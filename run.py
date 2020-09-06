@@ -34,6 +34,7 @@ except OSError as e:
     if e.errno != errno.EEXIST:
         raise RuntimeError('Unable to create checkpoint directory:', args.checkpoint)
 
+# -----------------------------prepare the 3D dataset as ground truth ------------------------------------
 print('Loading dataset...')
 dataset_path = 'data/data_3d_' + args.dataset + '.npz'
 if args.dataset == 'h36m':
@@ -64,6 +65,7 @@ for subject in dataset.subjects():
                 positions_3d.append(pos_3d)
             anim['positions_3d'] = positions_3d
 
+# -----------------------------prepare the 2D dataset as input ------------------------------------
 print('Loading 2D detections...')
 keypoints = np.load('data/data_2d_' + args.dataset + '_' + args.keypoints + '.npz', allow_pickle=True)
 keypoints_metadata = keypoints['metadata'].item()
@@ -92,6 +94,7 @@ for subject in dataset.subjects():
 
         assert len(keypoints[subject][action]) == len(dataset[subject][action]['positions_3d'])
 
+# -----------------------------normalize the 2D input ------------------------------------
 for subject in keypoints.keys():
     for action in keypoints[subject]:
         for cam_idx, kps in enumerate(keypoints[subject][action]):
@@ -111,6 +114,8 @@ semi_supervised = len(subjects_semi) > 0
 if semi_supervised and not dataset.supports_semi_supervised():
     raise RuntimeError('Semi-supervised training is not implemented for this dataset')
 
+
+# -----------------------------genrate the data splitter for training ------------------------------------
 
 def fetch(subjects, action_filter=None, subset=1, parse_3d_poses=True):
     out_poses_3d = []
@@ -171,6 +176,7 @@ action_filter = None if args.actions == '*' else args.actions.split(',')
 if action_filter is not None:
     print('Selected actions:', action_filter)
 
+# -----------------------------load the deep learning modelf------------------------------------
 cameras_valid, poses_valid, poses_valid_2d = fetch(subjects_test, action_filter)
 
 filter_widths = [int(x) for x in args.architecture.split(',')]
@@ -210,6 +216,8 @@ if torch.cuda.is_available():
     model_pos = model_pos.cuda()
     model_pos_train = model_pos_train.cuda()
 
+# -----------------------------Check if running the model training or model evaluation------------------------------------
+
 if args.resume or args.evaluate:
     chk_filename = os.path.join(args.checkpoint, args.resume if args.resume else args.evaluate)
     print('Loading checkpoint', chk_filename)
@@ -217,8 +225,8 @@ if args.resume or args.evaluate:
     print('This model was trained for {} epochs'.format(checkpoint['epoch']))
     model_pos_train.load_state_dict(checkpoint['model_pos'])
     model_pos.load_state_dict(checkpoint['model_pos'])
-
-    if args.evaluate and 'model_traj' in checkpoint:
+    print(checkpoint.keys())
+    if args.evaluate and 'model_traj' in checkpoint and checkpoint['model_traj'] != None:
         # Load trajectory model if it contained in the checkpoint (e.g. for inference in the wild)
         model_traj = TemporalModel(poses_valid_2d[0].shape[-2], poses_valid_2d[0].shape[-1], 1,
                                    filter_widths=filter_widths, causal=args.causal, dropout=args.dropout,
@@ -235,6 +243,8 @@ test_generator = UnchunkedGenerator(cameras_valid, poses_valid, poses_valid_2d,
                                     kps_left=kps_left, kps_right=kps_right, joints_left=joints_left,
                                     joints_right=joints_right)
 print('INFO: Testing on {} frames'.format(test_generator.num_frames()))
+
+# -----------------------------Begin training------------------------------------
 
 if not args.evaluate:
     cameras_train, poses_train, poses_train_2d = fetch(subjects_train, action_filter, subset=args.subset)
@@ -285,6 +295,8 @@ if not args.evaluate:
     epoch = 0
     initial_momentum = 0.1
     final_momentum = 0.001
+
+    # ---------------------------- data generator ----------------------------
 
     train_generator = ChunkedGenerator(args.batch_size // args.stride, cameras_train, poses_train, poses_train_2d,
                                        args.stride,
@@ -413,6 +425,8 @@ if not args.evaluate:
                 optimizer.step()
             losses_traj_train.append(epoch_loss_traj_train / N)
             losses_2d_train_unlabeled.append(epoch_loss_2d_train_unlabeled / N_semi)
+
+        # -------------------------- without semi-training------------------------
         else:
             # Regular supervised scenario
             for _, batch_3d, batch_2d in train_generator.next_epoch():
@@ -672,6 +686,7 @@ if not args.evaluate:
             plt.close('all')
 
 
+# -----------------------------Begin evaluation------------------------------------
 # Evaluate
 def evaluate(test_generator, action=None, return_predictions=False, use_trajectory_model=False):
     epoch_loss_3d_pos = 0
@@ -747,6 +762,7 @@ def evaluate(test_generator, action=None, return_predictions=False, use_trajecto
     return e1, e2, e3, ev
 
 
+# -----------------------------Begin visualization result------------------------------------
 if args.render:
     print('Rendering...')
 
