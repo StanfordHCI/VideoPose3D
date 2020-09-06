@@ -8,7 +8,6 @@ def convert_h36m_cdf_to_pos_rot(cdf: cdflib.CDF) -> list:
     poses = poses.reshape((poses.shape[1], poses.shape[2] // 3, 3))  # 1 x n x 32 x 3
     print(poses.shape[0])
 
-
     def dot_last_axis(a, b):
         return np.multiply(a, b).sum(len(a.shape) - 1)
 
@@ -30,9 +29,10 @@ def convert_h36m_cdf_to_pos_rot(cdf: cdflib.CDF) -> list:
     right_hand_top = poses[:, 30]
     right_hand_center = (right_wrist + right_hand_top) / 2
     hip_center = poses[:, 11]
-    waist_center = poses[:, 12]
+    waist_real_center = poses[:, 12]
     shoulder_center = poses[:, 13]
-    waist_up = shoulder_center - waist_center
+    waist_up = shoulder_center - waist_real_center
+    waist_center = (waist_real_center + hip_center) / 2
     hip_right = poses[:, 1] - poses[:, 6]
     shoulder_right = poses[:, 25] - poses[:, 17]  # this may be incorrect
     waist_right = hip_right * 2 + shoulder_right  # more emphasis on hip
@@ -45,6 +45,7 @@ def convert_h36m_cdf_to_pos_rot(cdf: cdflib.CDF) -> list:
     right_toe = poses[:, 10]
     right_knee = poses[:, 2]
     right_foot_center = (right_ankle + right_toe) / 2
+
     # %%
     def normalize(vec):
         return vec / np.linalg.norm(vec, axis=1, keepdims=True)
@@ -84,5 +85,52 @@ def convert_h36m_cdf_to_pos_rot(cdf: cdflib.CDF) -> list:
     outputs = np.concatenate((head_info, left_hand_info, right_hand_info, waist_info, left_foot_info, right_foot_info),
                              axis=1)
     # print(head_info.shape, outputs.shape)
-
     return outputs
+
+
+def visual_test(pos_3d):
+    import matplotlib.pyplot as plt
+    import cv2
+    # vr_poses = [[head_center, head_quat], [left_hand_center, left_hand_quat], [right_hand_center, right_hand_quat],
+    # [waist_center, waist_quat], [left_foot_center, left_foot_quat], [right_foot_center, right_foot_quat]]
+    bone_pair = [[0, 1], [0, 2], [0, 3], [3, 4], [3, 5]]
+
+    def draw_joint(pos: np.ndarray, quat: quaternion.quaternion):
+        front_vec = pos + quaternion.rotate_vectors(quat, [0, 0.2, 0])
+        right_vec = pos + quaternion.rotate_vectors(quat, [0.2, 0, 0])
+        up_vec = pos + quaternion.rotate_vectors(quat, [0, 0, 0.2])
+        plt.plot(*zip(pos, front_vec), zdir='z', c='blue')
+        plt.plot(*zip(pos, up_vec), zdir='z', c='green')
+        plt.plot(*zip(pos, right_vec), zdir='z', c='red')
+
+    def draw_bone(pos_a: np.ndarray, pos_b: np.ndarray, c='black'):
+        plt.plot(*zip(pos_a, pos_b), zdir='z', c='black')
+
+    parents = [-1, 0, 1, 2, 3, 4, 0, 6, 7, 8, 9, 0, 11, 12, 13, 14, 12,
+               16, 17, 18, 19, 20, 19, 22, 12, 24, 25, 26, 27, 28, 27, 30]
+    plt.figure(dpi=80)
+    print(pos_3d.shape)
+    for i in range(pos_3d.shape[0]):
+        plt.clf()
+        plt.subplot(111, projection='3d')
+        plt.xlim(-1.700, 1.700)
+        plt.ylim(-1.700, 1.700)
+        plt.gca().set_zlim(0, 6.400)
+        # temp_pose = pos_3d[i,:,:]
+        for j in range(pos_3d.shape[1]):
+            pose = pos_3d[i, j, :]
+            # print(pose)
+            draw_joint(pose[0:3], quaternion.as_quat_array(pose[3:7]))
+        for j, k in bone_pair:
+            draw_bone(pos_3d[i, j, 0:3], pos_3d[i, k, 0:3])
+        width, height = plt.gcf().get_size_inches() * plt.gcf().get_dpi()
+        plt.gcf().canvas.draw()
+        image = np.fromstring(plt.gcf().canvas.tostring_rgb(), dtype='uint8').reshape(int(height), int(width), 3)
+        cv2.imshow('im', image)
+        cv2.waitKey(1)
+
+
+if __name__ == "__main__":
+    path = 'data_3d_h36m_new.npz'
+    data = np.load(path, allow_pickle=True)['pos_rot'].item()
+    visual_test(data["S1"]["Posing 1"])

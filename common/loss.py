@@ -8,6 +8,9 @@
 import torch
 import numpy as np
 
+from common.quaternion import quat_to_rot_mat
+
+
 def mpjpe(predicted, target):
     """
     Mean per-joint position error (i.e. mean Euclidean distance),
@@ -87,3 +90,17 @@ def mean_velocity_error(predicted, target):
     velocity_target = np.diff(target, axis=0)
     
     return np.mean(np.linalg.norm(velocity_predicted - velocity_target, axis=len(target.shape)-1))
+
+
+def quat_criterion(output_quat, reference_quat):
+    assert output_quat.shape == reference_quat.shape
+    output_quat = output_quat.reshape(-1, 4)
+    reference_quat = reference_quat.reshape(-1, 4)
+    output_rot_mat = quat_to_rot_mat(output_quat)
+    reference_rot_mat = quat_to_rot_mat(reference_quat)
+    output_rot_mat_t = torch.transpose(output_rot_mat, 1, 2)
+    rot_mat_prod = torch.matmul(output_rot_mat_t, reference_rot_mat)
+    trace = torch.sum(torch.diagonal(rot_mat_prod, 0, 1, 2), dim=1)
+    all_quat_loss = torch.abs(torch.acos((trace - 2) / 2.00001))
+    return torch.mean(all_quat_loss)
+

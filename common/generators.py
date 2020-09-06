@@ -34,7 +34,6 @@ class ChunkedGenerator:
                  endless=False):
         assert poses_3d is None or len(poses_3d) == len(poses_2d), (len(poses_3d), len(poses_2d))
         assert cameras is None or len(cameras) == len(poses_2d)
-    
         # Build lineage info
         pairs = [] # (seq_idx, start_frame, end_frame, flip) tuples
         for i in range(len(poses_2d)):

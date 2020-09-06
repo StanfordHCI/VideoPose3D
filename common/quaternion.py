@@ -6,6 +6,8 @@
 #
 
 import torch
+import torchgeometry
+
 
 def qrot(q, v):
     """
@@ -33,3 +35,16 @@ def qinverse(q, inplace=False):
         w = q[..., :1]
         xyz = q[..., 1:]
         return torch.cat((w, -xyz), dim=len(q.shape)-1)
+
+
+def q_multiply(q1, q2):
+    return torch.stack((
+        q1[..., 0] * q2[..., 0] - q1[..., 1] * q2[..., 1] - q1[..., 2] * q2[..., 2] - q1[..., 3] * q2[..., 3],
+        q1[..., 0] * q2[..., 1] + q1[..., 1] * q2[..., 0] + q1[..., 2] * q2[..., 3] - q1[..., 3] * q2[..., 2],
+        q1[..., 0] * q2[..., 2] - q1[..., 1] * q2[..., 3] + q1[..., 2] * q2[..., 0] + q1[..., 3] * q2[..., 1],
+        q1[..., 0] * q2[..., 3] + q1[..., 1] * q2[..., 2] - q1[..., 2] * q2[..., 1] + q1[..., 3] * q2[..., 0],
+    ), dim=-1)
+
+
+def quat_to_rot_mat(quat):
+    return torchgeometry.angle_axis_to_rotation_matrix(torchgeometry.quaternion_to_angle_axis(quat))

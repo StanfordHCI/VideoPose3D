@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 from common.utils import wrap
-from common.quaternion import qrot, qinverse
+from common.quaternion import qrot, qinverse, q_multiply
 
 def normalize_screen_coordinates(X, w, h): 
     assert X.shape[-1] == 2
@@ -29,11 +29,20 @@ def world_to_camera(X, R, t):
     Rt = wrap(qinverse, R) # Invert rotation
     return wrap(qrot, np.tile(Rt, (*X.shape[:-1], 1)), X - t) # Rotate and translate
 
-    
+
+def world_to_camera_quat(q, R):
+    Rt = wrap(qinverse, R) # Invert rotation
+    return wrap(q_multiply, np.tile(Rt, (*q.shape[:-1], 1)), q)  # Rotate only
+
+
 def camera_to_world(X, R, t):
     return wrap(qrot, np.tile(R, (*X.shape[:-1], 1)), X) + t
 
-    
+
+def camera_to_world(q, R):
+    return wrap(q_multiply, q, np.tile(R, (*q.shape[:-1], 1)))
+
+
 def project_to_2d(X, camera_params):
     """
     Project 3D points to 2D using the Human3.6M camera projection function.
