@@ -37,9 +37,8 @@ except OSError as e:
 # -----------------------------prepare the 3D dataset as ground truth ------------------------------------
 print('Loading dataset...')
 dataset_path = 'data/data_3d_' + args.dataset + '.npz'
-if args.dataset == 'h36m':
+if args.dataset == 'h36m_new':
     from common.h36m_dataset import Human36mDataset
-
     dataset = Human36mDataset(dataset_path)
 elif args.dataset.startswith('humaneva'):
     from common.humaneva_dataset import HumanEvaDataset
@@ -65,12 +64,20 @@ for subject in dataset.subjects():
                 positions_3d.append(pos_3d)
             anim['positions_3d'] = positions_3d
 
+        if 'pos_rot' in anim:
+            positions_3d = []
+            for cam in anim['cameras']:
+                pos_3d = world_to_camera(anim['pos_rot'][:, :, :3], R=cam['orientation'], t=cam['translation'])
+                pos_3d[:, 1:, :3] -= pos_3d[:, :1, :3]  # Remove global offset, but keep trajectory in first position
+                positions_3d.append(pos_3d)
+            anim['positions_3d'] = positions_3d
+
 # -----------------------------prepare the 2D dataset as input ------------------------------------
 print('Loading 2D detections...')
 keypoints = np.load('data/data_2d_' + args.dataset + '_' + args.keypoints + '.npz', allow_pickle=True)
 keypoints_metadata = keypoints['metadata'].item()
 keypoints_symmetry = keypoints_metadata['keypoints_symmetry']
-kps_left, kps_right = list(keypoints_symmetry[0]), list(keypoints_symmetry[1])
+kps_left, kps_right = [1, 3, 5, 7, 9, 11, 13, 15, 17, 18], [2, 4, 6, 8, 10, 12, 14, 16, 19, 20]
 joints_left, joints_right = list(dataset.skeleton().joints_left()), list(dataset.skeleton().joints_right())
 keypoints = keypoints['positions_2d'].item()
 
@@ -115,7 +122,7 @@ if semi_supervised and not dataset.supports_semi_supervised():
     raise RuntimeError('Semi-supervised training is not implemented for this dataset')
 
 
-# -----------------------------genrate the data splitter for training ------------------------------------
+# -----------------------------generate the data splitter for training ------------------------------------
 
 def fetch(subjects, action_filter=None, subset=1, parse_3d_poses=True):
     out_poses_3d = []
@@ -238,6 +245,7 @@ if args.resume or args.evaluate:
     else:
         model_traj = None
 
+# TODO: make sure symmetry is correct
 test_generator = UnchunkedGenerator(cameras_valid, poses_valid, poses_valid_2d,
                                     pad=pad, causal_shift=causal_shift, augment=False,
                                     kps_left=kps_left, kps_right=kps_right, joints_left=joints_left,

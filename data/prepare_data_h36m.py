@@ -14,12 +14,15 @@ from glob import glob
 from shutil import rmtree
 
 import sys
+
+from convert_h36m_to_vr import convert_h36m_cdf_to_pos_rot
+
 sys.path.append('../')
 from common.h36m_dataset import Human36mDataset
 from common.camera import world_to_camera, project_to_2d, image_coordinates
 from common.utils import wrap
 
-output_filename = 'data_3d_h36m'
+output_filename = 'data_3d_h36m_new'
 output_filename_2d = 'data_2d_h36m_gt'
 subjects = ['S1', 'S5', 'S6', 'S7', 'S8', 'S9', 'S11']
 
@@ -132,19 +135,19 @@ if __name__ == '__main__':
                                        .replace('WalkingDog', 'WalkDog')
                 
                 hf = cdflib.CDF(f)
-                positions = hf['Pose'].reshape(-1, 32, 3)
-                positions /= 1000 # Meters instead of millimeters
+                positions = convert_h36m_cdf_to_pos_rot(hf)  # (time, joint [6], 7 numbers[pos + rot])
                 output[subject][canonical_name] = positions.astype('float32')
         
         print('Saving...')
-        np.savez_compressed(output_filename, positions_3d=output)
+        np.savez_compressed(output_filename, pos_rot=output)
         
         print('Done.')
             
     else:
         print('Please specify the dataset source')
         exit(0)
-        
+
+'''
     # Create 2D pose file
     print('')
     print('Computing ground-truth 2D poses...')
@@ -171,3 +174,4 @@ if __name__ == '__main__':
     np.savez_compressed(output_filename_2d, positions_2d=output_2d_poses, metadata=metadata)
     
     print('Done.')
+'''
