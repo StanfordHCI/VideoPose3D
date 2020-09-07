@@ -4,6 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 #
+from typing import Union
 
 import numpy as np
 import torch
@@ -44,6 +45,24 @@ def camera_to_world_rot(q, R):
     return wrap(q_multiply, q, np.tile(R, (*q.shape[:-1], 1)))
 
 
+def only_keep_roll_rot(q):
+    q_w = q[..., 0]
+    q_x = q[..., 1]
+    q_y = np.zeros(q[..., 2].shape)
+    q_z = np.zeros(q[..., 3].shape)
+    q_len = q_w ** 2 + q_x ** 2
+    q_w /= q_len
+    q_x /= q_len
+    return np.stack((q_w, q_x, q_y, q_z), axis=-1).astype('float32')
+
+
+def only_keep_x_y(t):
+    x = t[..., 0]
+    y = t[..., 1]
+    z = np.zeros(t[..., 2].shape)
+    return np.stack((x, y, z), axis=-1).astype('float32')
+
+
 def random_z_rot(size: list) -> np.array:
     """
     Generate random rotation quaternion in arbitrary shape
@@ -70,15 +89,21 @@ def random_x_y_shift(size: list, x_start=-2, x_end=2, y_start=-2, y_end=2) -> np
     return np.stack((vec_x, vec_y, vec_z), axis=-1).astype('float32')
 
 
-def apply_transform(x, r, t):
-    return wrap(qrot, r, x) + t
+def apply_transform(x, r, t) -> Union[np.array, torch.Tensor]:
+    if type(x) is torch.Tensor:
+        return qrot(r, x) + t
+    else:
+        return wrap(qrot, r, x) + t
 
 
-def apply_transform_rot(q, r):
-    return wrap(q_multiply, r, q)
+def apply_transform_rot(q, r) -> Union[np.array, torch.Tensor]:
+    if type(q) is torch.Tensor:
+        return q_multiply(r, q)
+    else:
+        return wrap(q_multiply, r, q)
 
 
-def apply_transform_combined(xq, r, t) -> np.array:
+def apply_transform_combined(xq, r, t) -> Union[np.array, torch.Tensor]:
     """
     Apply offset and rotation to a list of positions and rotations
     Please make sure the first few axis of `xq`, `r`, and `t` have matched shape
@@ -89,7 +114,24 @@ def apply_transform_combined(xq, r, t) -> np.array:
     old_q = xq[..., 3:]
     new_x = apply_transform(old_x, r, t)
     new_q = apply_transform_rot(old_q, r)
-    return np.concatenate((new_x, new_q), axis=-1)
+
+    if type(new_x) is torch.Tensor:
+        return torch.cat((new_x, new_q), dim=-1)
+    else:
+        return np.concatenate((new_x, new_q), axis=-1)
+
+
+def transform_with_last_item(array: torch.Tensor) -> torch.Tensor:
+    array_joints = array[..., :-1, :]
+    array_repeat_sz = [1] * len(array.shape)
+    array_repeat_sz[-2] = array_joints.shape[-2]
+    array_transform = array[..., -1:, :].repeat(*array_repeat_sz)
+    transformed_joints = apply_transform_combined(
+        array_joints,
+        array_transform[..., 3:],
+        array_transform[..., :3]
+    )
+    return transformed_joints
 
 
 def project_to_2d(X, camera_params):

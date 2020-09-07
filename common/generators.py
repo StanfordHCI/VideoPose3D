@@ -189,7 +189,10 @@ class ChunkedGeneratorDataset(Dataset):
             else:
                 batch_3d = seq_3d[low_3d:high_3d]
 
-            batch_3d = convert_to_vr(batch_3d, transform_t, transform_q)
+            combined_transform = np.concatenate((transform_t, transform_q), axis=-1)
+            tiled_transform = np.tile(combined_transform, (batch_3d.shape[0], 1, 1))
+            batch_3d = np.concatenate((batch_3d, tiled_transform), axis=1)
+            # batch_3d = convert_to_vr(batch_3d, transform_t, transform_q)
 
             if flip:
                 # Flip 3D joints
@@ -228,7 +231,7 @@ class ChunkedGenerator(DataLoader):
                                                shuffle, random_seed,
                                                augment, kps_left, kps_right, joints_left, joints_right,
                                                endless, skeleton)
-        super(ChunkedGenerator, self).__init__(self.dataset, batch_size=batch_size, shuffle=shuffle, num_workers=8,
+        super(ChunkedGenerator, self).__init__(self.dataset, batch_size=batch_size, shuffle=shuffle, num_workers=0,
                                                collate_fn=self.combine)
 
     @staticmethod
@@ -339,12 +342,16 @@ class UnchunkedGenerator:
                                                                                       (0, 0),
                                                                                       (0, 0)),
                                                                                      'edge'), axis=0)
+
             # generate random transform
             transform_t = random_x_y_shift([])
             transform_q = random_z_rot([])
 
             # apply random transform
-            batch_3d = convert_to_vr(batch_3d, transform_t, transform_q)
+            # batch_3d = convert_to_vr(batch_3d, transform_t, transform_q)
+            combined_transform = np.concatenate((transform_t, transform_q), axis=-1)
+            tiled_transform = np.tile(combined_transform, (batch_3d.shape[0], batch_3d.shape[1], 1, 1))
+            batch_3d = np.concatenate((batch_3d, tiled_transform), axis=2)
             batch_3d_input = convert_to_vr(batch_3d_input, transform_t, transform_q)
 
             if self.augment:
