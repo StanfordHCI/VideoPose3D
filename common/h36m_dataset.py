@@ -15,7 +15,9 @@ from common.camera import normalize_screen_coordinates, image_coordinates
 # head, left hand, right hand, waist, left foot, right foot
 h36m_skeleton = Skeleton(parents=[-1, 0, 0, 0, 3, 3],
                          joints_left=[1, 4],
-                         joints_right=[3, 5])
+                         joints_right=[2, 5],
+                         input_joints=[0, 1, 2],
+                         output_joints=[3, 4, 5])
 
 h36m_cameras_intrinsic_params = [
     {

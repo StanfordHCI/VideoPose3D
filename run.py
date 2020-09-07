@@ -9,6 +9,7 @@ import numpy as np
 
 from common.arguments import parse_args
 import torch
+import datetime
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
 import torch.nn.functional as F
@@ -26,6 +27,9 @@ from common.utils import deterministic_random
 from data.convert_h36m_to_vr import visual_test
 args = parse_args()
 print(args)
+
+# set seed
+np.random.seed(1234)
 
 try:
     # Create checkpoint directory if it does not exist
@@ -53,6 +57,7 @@ else:
 
 print('Preparing data...')
 
+# Model v1.5: Do not apply camera transformation
 for subject in dataset.subjects():
     for action in dataset[subject].keys():
         anim = dataset[subject][action]
@@ -69,12 +74,12 @@ for subject in dataset.subjects():
             positions_3d = []
             for cam in anim['cameras']:
                 pos_rot = anim['pos_rot'].copy()
-                pos_rot[:, :, :3] = world_to_camera(pos_rot[:, :, :3], R=cam['orientation'], t=cam['translation'])
-                pos_rot[:, 1:, :3] -= pos_rot[:, :1, :3]  # Remove global offset, but keep trajectory in first position
+                # pos_rot[:, :, :3] = world_to_camera(pos_rot[:, :, :3], R=cam['orientation'], t=cam['translation'])
+                # pos_rot[:, 1:, :3] -= pos_rot[:, :1, :3]  # Remove global offset, but keep trajectory in first position
                 positions_3d.append(pos_rot)
             anim['pos_rot'] = positions_3d
 
-writer = SummaryWriter(log_dir="./logs")
+writer = SummaryWriter(log_dir="./logs/"+datetime.datetime.now().strftime("%Y%m%dT%H%M%S"))
 # -----------------------------prepare the 2D dataset as input ------------------------------------
 print('Loading 2D detections...')
 keypoints = np.load('data/data_2d_' + args.dataset + '_' + args.keypoints + '.npz', allow_pickle=True)
@@ -158,7 +163,7 @@ def fetch(subjects, action_filter=None, subset=1, parse_3d_poses=True):
                 assert len(poses_3d) == len(poses_2d), 'Camera count mismatch'
                 for i in range(len(poses_3d)):  # Iterate across cameras
                     out_poses_3d.append(poses_3d[i])
-    print(out_poses_3d[0][0:2,:,:])
+    #print(out_poses_3d[0][0:2,:,:])
     if len(out_camera_params) == 0:
         out_camera_params = None
     if len(out_poses_3d) == 0:
@@ -188,23 +193,27 @@ if action_filter is not None:
 
 # -----------------------------load the deep learning modelf------------------------------------
 cameras_valid, poses_valid, poses_valid_2d = fetch(subjects_test, action_filter)
-raise KeyboardInterrupt
+
 filter_widths = [int(x) for x in args.architecture.split(',')]
 if not args.disable_optimizations and not args.dense and args.stride == 1:
     # Use optimized model for single-frame predictions
     model_pos_train = TemporalModelOptimized1f(poses_valid_2d[0].shape[-2], poses_valid_2d[0].shape[-1],
-                                               dataset.skeleton().num_joints(),
+                                               len(dataset.skeleton().input_joints()), 7,
+                                               len(dataset.skeleton().output_joints()),
                                                filter_widths=filter_widths, causal=args.causal, dropout=args.dropout,
                                                channels=args.channels)
 else:
     # When incompatible settings are detected (stride > 1, dense filters, or disabled optimization) fall back to normal model
     model_pos_train = TemporalModel(poses_valid_2d[0].shape[-2], poses_valid_2d[0].shape[-1],
-                                    dataset.skeleton().num_joints(),
+                                    len(dataset.skeleton().input_joints()), 7,
+                                    len(dataset.skeleton().output_joints()),
                                     filter_widths=filter_widths, causal=args.causal, dropout=args.dropout,
                                     channels=args.channels,
                                     dense=args.dense)
 
-model_pos = TemporalModel(poses_valid_2d[0].shape[-2], poses_valid_2d[0].shape[-1], dataset.skeleton().num_joints(),
+model_pos = TemporalModel(poses_valid_2d[0].shape[-2], poses_valid_2d[0].shape[-1],
+                          len(dataset.skeleton().input_joints()), 7,
+                          len(dataset.skeleton().output_joints()),
                           filter_widths=filter_widths, causal=args.causal, dropout=args.dropout, channels=args.channels,
                           dense=args.dense)
 
@@ -252,7 +261,7 @@ if args.resume or args.evaluate:
 test_generator = UnchunkedGenerator(cameras_valid, poses_valid, poses_valid_2d,
                                     pad=pad, causal_shift=causal_shift, augment=False,
                                     kps_left=kps_left, kps_right=kps_right, joints_left=joints_left,
-                                    joints_right=joints_right)
+                                    joints_right=joints_right, skeleton=dataset.skeleton())
 print('INFO: Testing on {} frames'.format(test_generator.num_frames()))
 
 # -----------------------------Begin training------------------------------------
@@ -316,9 +325,9 @@ if not args.evaluate:
                                        args.stride,
                                        pad=pad, causal_shift=causal_shift, shuffle=True, augment=args.data_augmentation,
                                        kps_left=kps_left, kps_right=kps_right, joints_left=joints_left,
-                                       joints_right=joints_right)
+                                       joints_right=joints_right, skeleton=dataset.skeleton())
     train_generator_eval = UnchunkedGenerator(cameras_train, poses_train, poses_train_2d,
-                                              pad=pad, causal_shift=causal_shift, augment=False)
+                                              pad=pad, causal_shift=causal_shift, augment=False, skeleton=dataset.skeleton())
     print('INFO: Training on {} frames'.format(train_generator_eval.num_frames()))
     if semi_supervised:
         semi_generator = ChunkedGenerator(args.batch_size // args.stride, cameras_semi, None, poses_semi_2d,
@@ -445,18 +454,20 @@ if not args.evaluate:
         # -------------------------- without semi-training------------------------
         else:
             # Regular supervised scenario
-            for _, batch_3d, batch_2d in train_generator.next_epoch():
+            for _, batch_3d, batch_2d, batch_3d_input in train_generator.next_epoch():
+
                 inputs_3d = torch.from_numpy(batch_3d.astype('float32'))
                 inputs_2d = torch.from_numpy(batch_2d.astype('float32'))
+                inputs_3d_input = torch.from_numpy(batch_3d_input.astype('float32'))
                 if torch.cuda.is_available():
                     inputs_3d = inputs_3d.cuda()
                     inputs_2d = inputs_2d.cuda()
-                inputs_3d[:, :, 0, 0:3] = 0
+                    inputs_3d_input = inputs_3d_input.cuda()
 
                 optimizer.zero_grad()
 
                 # Predict 3D poses
-                predicted_3d_pos_rot = model_pos_train(inputs_2d)
+                predicted_3d_pos_rot = model_pos_train((inputs_2d, inputs_3d_input))
                 predicted_3d_pos = predicted_3d_pos_rot[..., :3]
                 predicted_3d_rot = predicted_3d_pos_rot[..., 3:]
                 reference_pos = inputs_3d[..., :3]
@@ -466,7 +477,6 @@ if not args.evaluate:
                 writer.add_scalar(f"train/loss_pos", loss_3d_pos, iter)
                 writer.add_scalar(f"train/loss_rot", loss_3d_rot, iter)
                 iter += 1
-                # TODO: tensorboard pos rot
                 epoch_loss_3d_train += inputs_3d.shape[0] * inputs_3d.shape[1] * loss_3d_pos.item()
                 epoch_loss_rot_train += inputs_3d.shape[0] * inputs_3d.shape[1] * loss_3d_rot.item()
                 N += inputs_3d.shape[0] * inputs_3d.shape[1]
@@ -480,7 +490,6 @@ if not args.evaluate:
         loss_rot_train = epoch_loss_rot_train / N
         losses_3d_train.append(loss_3d_train)
         losses_rot_train.append(loss_rot_train)
-        # TODO: tensorboard avg pos rot
         writer.add_scalar(f"train/avg_loss_pos", loss_3d_train, iter)
         writer.add_scalar(f"train/avg_loss_rot", loss_rot_train, iter)
 
@@ -501,17 +510,19 @@ if not args.evaluate:
 
             if not args.no_eval:
                 # Evaluate on test set
-                for cam, batch, batch_2d in test_generator.next_epoch():
+                for cam, batch, batch_2d, batch_3d_input in test_generator.next_epoch():
                     inputs_3d = torch.from_numpy(batch.astype('float32'))
                     inputs_2d = torch.from_numpy(batch_2d.astype('float32'))
+                    inputs_3d_input = torch.from_numpy(batch_3d_input.astype('float32'))
                     if torch.cuda.is_available():
                         inputs_3d = inputs_3d.cuda()
                         inputs_2d = inputs_2d.cuda()
+                        inputs_3d_input = inputs_3d_input.cuda()
+
                     inputs_traj = inputs_3d[:, :, :1].clone()
-                    inputs_3d[:, :, 0, 0:3] = 0
 
                     # Predict 3D poses
-                    predicted_3d_pos_rot = model_pos_train(inputs_2d)
+                    predicted_3d_pos_rot = model_pos((inputs_2d, inputs_3d_input))
                     predicted_3d_pos = predicted_3d_pos_rot[..., :3]
                     predicted_3d_rot = predicted_3d_pos_rot[..., 3:]
                     reference_pos = inputs_3d[..., :3]
@@ -542,10 +553,8 @@ if not args.evaluate:
                             1] * loss_reconstruction.item()
                         assert reconstruction.shape[0] * reconstruction.shape[1] == inputs_3d.shape[0] * \
                                inputs_3d.shape[1]
-
                 losses_3d_valid.append(epoch_loss_3d_valid / N)
                 losses_rot_valid.append(epoch_loss_rot_valid / N)
-                # TODO: tensorboard val pos rot
                 writer.add_scalar(f"val/loss_pos_val", epoch_loss_3d_valid / N, iter)
                 writer.add_scalar(f"val/loss_rot_val", epoch_loss_rot_valid / N, iter)
 
@@ -559,21 +568,22 @@ if not args.evaluate:
                 epoch_loss_traj_train_eval = 0
                 epoch_loss_2d_train_labeled_eval = 0
                 N = 0
-                for cam, batch, batch_2d in train_generator_eval.next_epoch():
+                for cam, batch, batch_2d, batch_3d_input in train_generator_eval.next_epoch():
                     if batch_2d.shape[1] == 0:
                         # This can only happen when downsampling the dataset
                         continue
 
                     inputs_3d = torch.from_numpy(batch.astype('float32'))
                     inputs_2d = torch.from_numpy(batch_2d.astype('float32'))
+                    inputs_3d_input = torch.from_numpy(batch_3d_input.astype('float32'))
                     if torch.cuda.is_available():
                         inputs_3d = inputs_3d.cuda()
                         inputs_2d = inputs_2d.cuda()
+                        inputs_3d_input = inputs_3d_input.cuda()
                     inputs_traj = inputs_3d[:, :, :1].clone()
-                    inputs_3d[:, :, 0, 0:3] = 0
 
                     # Compute 3D poses
-                    predicted_3d_pos_rot = model_pos_train(inputs_2d)
+                    predicted_3d_pos_rot = model_pos((inputs_2d, inputs_3d_input))
                     predicted_3d_pos = predicted_3d_pos_rot[..., :3]
                     predicted_3d_rot = predicted_3d_pos_rot[..., 3:]
                     reference_pos = inputs_3d[..., :3]
@@ -603,10 +613,8 @@ if not args.evaluate:
                             1] * loss_reconstruction.item()
                         assert reconstruction.shape[0] * reconstruction.shape[1] == inputs_3d.shape[0] * \
                                inputs_3d.shape[1]
-
                 loss_3d_train_eval = epoch_loss_3d_train_eval / N
                 loss_rot_train_eval = epoch_loss_rot_train_eval / N
-                # TODO: tensorboard train eval pos rot
                 writer.add_scalar(f"train/val_loss_pos_train", loss_3d_train_eval , iter)
                 writer.add_scalar(f"train/val_loss_rot_train", loss_rot_train_eval , iter)
 
@@ -847,7 +855,8 @@ if args.render:
 
     gen = UnchunkedGenerator(None, None, [input_keypoints],
                              pad=pad, causal_shift=causal_shift, augment=args.test_time_augmentation,
-                             kps_left=kps_left, kps_right=kps_right, joints_left=joints_left, joints_right=joints_right)
+                             kps_left=kps_left, kps_right=kps_right, joints_left=joints_left, joints_right=joints_right,
+                             skeleton=dataset.skeleton())
     prediction = evaluate(gen, return_predictions=True)
     if model_traj is not None and ground_truth is None:
         prediction_traj = evaluate(gen, return_predictions=True, use_trajectory_model=True)
@@ -958,7 +967,7 @@ else:
             gen = UnchunkedGenerator(None, poses_act, poses_2d_act,
                                      pad=pad, causal_shift=causal_shift, augment=args.test_time_augmentation,
                                      kps_left=kps_left, kps_right=kps_right, joints_left=joints_left,
-                                     joints_right=joints_right)
+                                     joints_right=joints_right, skeleton=dataset.skeleton())
             e1, e2, e3, ev = evaluate(gen, action_key)
             errors_p1.append(e1)
             errors_p2.append(e2)

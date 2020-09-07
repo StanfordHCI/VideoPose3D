@@ -8,6 +8,26 @@
 from itertools import zip_longest
 import numpy as np
 
+from common.camera import random_x_y_shift, random_z_rot, apply_transform_combined
+from common.skeleton import Skeleton
+
+
+def extract_3d(poses_3d, input_joints, output_joints):
+    poses_3d_input = []
+    poses_3d_output = []
+    for i in range(len(poses_3d)):
+        poses_3d_input.append(poses_3d[i][:, input_joints, :])
+        poses_3d_output.append(poses_3d[i][:, output_joints, :])
+    return poses_3d_output, poses_3d_input
+
+
+def convert_to_vr(orig_data, t, q):
+    orig_data_size = list(orig_data.shape[:-1]) + [1]
+    current_t = np.tile(t, orig_data_size)
+    current_q = np.tile(q, orig_data_size)
+    return apply_transform_combined(orig_data.astype('float32'), current_q, current_t)
+
+
 class ChunkedGenerator:
     """
     Batched data generator, used for training.
@@ -27,20 +47,23 @@ class ChunkedGenerator:
     kps_left and kps_right -- list of left/right 2D keypoints if flipping is enabled
     joints_left and joints_right -- list of left/right 3D joints if flipping is enabled
     """
+
     def __init__(self, batch_size, cameras, poses_3d, poses_2d,
                  chunk_length, pad=0, causal_shift=0,
                  shuffle=True, random_seed=1234,
                  augment=False, kps_left=None, kps_right=None, joints_left=None, joints_right=None,
-                 endless=False):
+                 endless=False, skeleton: Skeleton = None):
         assert poses_3d is None or len(poses_3d) == len(poses_2d), (len(poses_3d), len(poses_2d))
         assert cameras is None or len(cameras) == len(poses_2d)
         # Build lineage info
-        pairs = [] # (seq_idx, start_frame, end_frame, flip) tuples
+        pairs = []  # (seq_idx, start_frame, end_frame, flip) tuples
+        if poses_3d is not None:
+            poses_3d, poses_3d_input = extract_3d(poses_3d, skeleton.input_joints(), skeleton.output_joints())
         for i in range(len(poses_2d)):
             assert poses_3d is None or poses_3d[i].shape[0] == poses_3d[i].shape[0]
             n_chunks = (poses_2d[i].shape[0] + chunk_length - 1) // chunk_length
             offset = (n_chunks * chunk_length - poses_2d[i].shape[0]) // 2
-            bounds = np.arange(n_chunks+1)*chunk_length - offset
+            bounds = np.arange(n_chunks + 1) * chunk_length - offset
             augment_vector = np.full(len(bounds - 1), False, dtype=bool)
             pairs += zip(np.repeat(i, len(bounds - 1)), bounds[:-1], bounds[1:], augment_vector)
             if augment:
@@ -51,7 +74,9 @@ class ChunkedGenerator:
             self.batch_cam = np.empty((batch_size, cameras[0].shape[-1]))
         if poses_3d is not None:
             self.batch_3d = np.empty((batch_size, chunk_length, poses_3d[0].shape[-2], poses_3d[0].shape[-1]))
-        self.batch_2d = np.empty((batch_size, chunk_length + 2*pad, poses_2d[0].shape[-2], poses_2d[0].shape[-1]))
+            self.batch_3d_input = np.empty(
+                (batch_size, chunk_length + 2 * pad, poses_3d_input[0].shape[-2], poses_3d_input[0].shape[-1]))
+        self.batch_2d = np.empty((batch_size, chunk_length + 2 * pad, poses_2d[0].shape[-2], poses_2d[0].shape[-1]))
 
         self.num_batches = (len(pairs) + batch_size - 1) // batch_size
         self.batch_size = batch_size
@@ -62,29 +87,38 @@ class ChunkedGenerator:
         self.causal_shift = causal_shift
         self.endless = endless
         self.state = None
-        
+
         self.cameras = cameras
         self.poses_3d = poses_3d
         self.poses_2d = poses_2d
-        
+        self.poses_3d_input = [] if poses_3d is None else poses_3d_input
+
         self.augment = augment
         self.kps_left = kps_left
         self.kps_right = kps_right
-        self.joints_left = joints_left
-        self.joints_right = joints_right
-        
+        if joints_left is not None and joints_right is not None:
+            self.joints_left = list(set(joints_left).union(set(skeleton.output_joints())))
+            self.joints_right = list(set(joints_right).union(set(skeleton.output_joints())))
+            self.joints_left_input = list(set(joints_left).union(set(skeleton.input_joints())))
+            self.joints_right_input = list(set(joints_right).union(set(skeleton.input_joints())))
+        else:
+            self.joints_left = None
+            self.joints_right = None
+            self.joints_left_input = None
+            self.joints_right_input = None
+
     def num_frames(self):
         return self.num_batches * self.batch_size
-    
+
     def random_state(self):
         return self.random
-    
+
     def set_random_state(self, random):
         self.random = random
-        
+
     def augment_enabled(self):
         return self.augment
-    
+
     def next_pairs(self):
         if self.state is None:
             if self.shuffle:
@@ -94,32 +128,54 @@ class ChunkedGenerator:
             return 0, pairs
         else:
             return self.state
-    
-    def next_epoch(self):
+
+    def next_epoch(self) -> (np.array, np.array, np.array, np.array):
+        """
+        Get next training data
+        Returns:
+            cam_array:
+            batch_3d: as output
+            batch_2d: as input
+            batch_3d_extra: as input
+       """
         enabled = True
         while enabled:
             start_idx, pairs = self.next_pairs()
             for b_i in range(start_idx, self.num_batches):
-                chunks = pairs[b_i*self.batch_size : (b_i+1)*self.batch_size]
+                chunks = pairs[b_i * self.batch_size: (b_i + 1) * self.batch_size]
                 for i, (seq_i, start_3d, end_3d, flip) in enumerate(chunks):
+                    transform_t = random_x_y_shift([])  # generate a random transform
+                    transform_q = random_z_rot([])
                     start_2d = start_3d - self.pad - self.causal_shift
                     end_2d = end_3d + self.pad - self.causal_shift
 
                     # 2D poses
                     seq_2d = self.poses_2d[seq_i]
+                    seq_3d_input = self.poses_3d_input[seq_i]
                     low_2d = max(start_2d, 0)
                     high_2d = min(end_2d, seq_2d.shape[0])
                     pad_left_2d = low_2d - start_2d
                     pad_right_2d = end_2d - high_2d
                     if pad_left_2d != 0 or pad_right_2d != 0:
-                        self.batch_2d[i] = np.pad(seq_2d[low_2d:high_2d], ((pad_left_2d, pad_right_2d), (0, 0), (0, 0)), 'edge')
+                        self.batch_2d[i] = np.pad(seq_2d[low_2d:high_2d], ((pad_left_2d, pad_right_2d), (0, 0), (0, 0)),
+                                                  'edge')
+                        self.batch_3d_input[i] = np.pad(seq_3d_input[low_2d:high_2d],
+                                                        ((pad_left_2d, pad_right_2d), (0, 0), (0, 0)),
+                                                        'edge')
                     else:
                         self.batch_2d[i] = seq_2d[low_2d:high_2d]
+                        self.batch_3d_input[i] = seq_3d_input[low_2d:high_2d]
+
+                    self.batch_3d_input[i] = convert_to_vr(self.batch_3d_input[i], transform_t, transform_q)
 
                     if flip:
                         # Flip 2D keypoints
                         self.batch_2d[i, :, :, 0] *= -1
-                        self.batch_2d[i, :, self.kps_left + self.kps_right] = self.batch_2d[i, :, self.kps_right + self.kps_left]
+                        self.batch_2d[i, :, self.kps_left + self.kps_right] = self.batch_2d[i, :,
+                                                                              self.kps_right + self.kps_left]
+                        self.batch_3d_input[i, :, :, [0, 3, 4]] *= -1
+                        self.batch_3d_input[i, :, self.joints_left_input + self.joints_right_input] = \
+                            self.batch_3d_input[i, :, self.joints_right_input + self.joints_left_input]
 
                     # 3D poses
                     if self.poses_3d is not None:
@@ -129,15 +185,18 @@ class ChunkedGenerator:
                         pad_left_3d = low_3d - start_3d
                         pad_right_3d = end_3d - high_3d
                         if pad_left_3d != 0 or pad_right_3d != 0:
-                            self.batch_3d[i] = np.pad(seq_3d[low_3d:high_3d], ((pad_left_3d, pad_right_3d), (0, 0), (0, 0)), 'edge')
+                            self.batch_3d[i] = np.pad(seq_3d[low_3d:high_3d],
+                                                      ((pad_left_3d, pad_right_3d), (0, 0), (0, 0)), 'edge')
                         else:
                             self.batch_3d[i] = seq_3d[low_3d:high_3d]
 
+                        self.batch_3d[i] = convert_to_vr(self.batch_3d[i], transform_t, transform_q)
+
                         if flip:
                             # Flip 3D joints
-                            self.batch_3d[i, :, :, 0] *= -1
+                            self.batch_3d[i, :, :, [0, 3, 4]] *= -1
                             self.batch_3d[i, :, self.joints_left + self.joints_right] = \
-                                    self.batch_3d[i, :, self.joints_right + self.joints_left]
+                                self.batch_3d[i, :, self.joints_right + self.joints_left]
 
                     # Cameras
                     if self.cameras is not None:
@@ -150,19 +209,21 @@ class ChunkedGenerator:
                 if self.endless:
                     self.state = (b_i + 1, pairs)
                 if self.poses_3d is None and self.cameras is None:
-                    yield None, None, self.batch_2d[:len(chunks)]
+                    yield None, None, self.batch_2d[:len(chunks)], None
                 elif self.poses_3d is not None and self.cameras is None:
-                    yield None, self.batch_3d[:len(chunks)], self.batch_2d[:len(chunks)]
+                    yield None, self.batch_3d[:len(chunks)], self.batch_2d[:len(chunks)], self.batch_3d_input[
+                                                                                          :len(chunks)]
                 elif self.poses_3d is None:
-                    yield self.batch_cam[:len(chunks)], None, self.batch_2d[:len(chunks)]
+                    yield self.batch_cam[:len(chunks)], None, self.batch_2d[:len(chunks)], None
                 else:
-                    yield self.batch_cam[:len(chunks)], self.batch_3d[:len(chunks)], self.batch_2d[:len(chunks)]
-            
+                    yield self.batch_cam[:len(chunks)], self.batch_3d[:len(chunks)], self.batch_2d[:len(
+                        chunks)], self.batch_3d_input[:len(chunks)]
+
             if self.endless:
                 self.state = None
             else:
                 enabled = False
-            
+
 
 class UnchunkedGenerator:
     """
@@ -182,57 +243,101 @@ class UnchunkedGenerator:
     kps_left and kps_right -- list of left/right 2D keypoints if flipping is enabled
     joints_left and joints_right -- list of left/right 3D joints if flipping is enabled
     """
-    
+
     def __init__(self, cameras, poses_3d, poses_2d, pad=0, causal_shift=0,
-                 augment=False, kps_left=None, kps_right=None, joints_left=None, joints_right=None):
+                 augment=False, kps_left=None, kps_right=None, joints_left=None, joints_right=None,
+                 skeleton: Skeleton = None):
+        # TODO: parse skeleton
         assert poses_3d is None or len(poses_3d) == len(poses_2d)
         assert cameras is None or len(cameras) == len(poses_2d)
-
+        if poses_3d is not None:
+            poses_3d, poses_3d_input = extract_3d(poses_3d, skeleton.input_joints(), skeleton.output_joints())
         self.augment = augment
         self.kps_left = kps_left
         self.kps_right = kps_right
-        self.joints_left = joints_left
-        self.joints_right = joints_right
-        
+        if joints_left is not None and joints_right is not None:
+            self.joints_left = list(set(joints_left).union(set(skeleton.output_joints())))
+            self.joints_right = list(set(joints_right).union(set(skeleton.output_joints())))
+            self.joints_left_input = list(set(joints_left).union(set(skeleton.input_joints())))
+            self.joints_right_input = list(set(joints_right).union(set(skeleton.input_joints())))
+        else:
+            self.joints_left = None
+            self.joints_right = None
+            self.joints_left_input = None
+            self.joints_right_input = None
+
         self.pad = pad
         self.causal_shift = causal_shift
         self.cameras = [] if cameras is None else cameras
         self.poses_3d = [] if poses_3d is None else poses_3d
         self.poses_2d = poses_2d
-        
+        self.poses_3d_input = [] if poses_3d is None else poses_3d_input
+
     def num_frames(self):
         count = 0
         for p in self.poses_2d:
             count += p.shape[0]
         return count
-    
+
     def augment_enabled(self):
         return self.augment
-    
+
     def set_augment(self, augment):
         self.augment = augment
-    
-    def next_epoch(self):
-        for seq_cam, seq_3d, seq_2d in zip_longest(self.cameras, self.poses_3d, self.poses_2d):
+
+    def next_epoch(self) -> (np.array, np.array, np.array, np.array):
+        """
+        Get next training data
+        Returns:
+            cam_array:
+            batch_3d: as output
+            batch_2d: as input
+            batch_3d_extra: as input
+       """
+        for seq_cam, seq_3d, seq_2d, seq_3d_input in zip_longest(self.cameras, self.poses_3d, self.poses_2d,
+                                                                 self.poses_3d_input):
+            # TODO: apply random transformation
             batch_cam = None if seq_cam is None else np.expand_dims(seq_cam, axis=0)
             batch_3d = None if seq_3d is None else np.expand_dims(seq_3d, axis=0)
             batch_2d = np.expand_dims(np.pad(seq_2d,
-                            ((self.pad + self.causal_shift, self.pad - self.causal_shift), (0, 0), (0, 0)),
-                            'edge'), axis=0)
+                                             ((self.pad + self.causal_shift, self.pad - self.causal_shift), (0, 0),
+                                              (0, 0)),
+                                             'edge'), axis=0)
+            batch_3d_input = None if seq_3d_input is None else np.expand_dims(np.pad(seq_3d_input,
+                                                                                     ((self.pad + self.causal_shift,
+                                                                                       self.pad - self.causal_shift),
+                                                                                      (0, 0),
+                                                                                      (0, 0)),
+                                                                                     'edge'), axis=0)
+            # generate random transform
+            transform_t = random_x_y_shift([])
+            transform_q = random_z_rot([])
+
+            # apply random transform
+            batch_3d = convert_to_vr(batch_3d, transform_t, transform_q)
+            batch_3d_input = convert_to_vr(batch_3d_input, transform_t, transform_q)
+
+
             if self.augment:
                 # Append flipped version
                 if batch_cam is not None:
                     batch_cam = np.concatenate((batch_cam, batch_cam), axis=0)
                     batch_cam[1, 2] *= -1
                     batch_cam[1, 7] *= -1
-                
+
                 if batch_3d is not None:
                     batch_3d = np.concatenate((batch_3d, batch_3d), axis=0)
-                    batch_3d[1, :, :, 0] *= -1
-                    batch_3d[1, :, self.joints_left + self.joints_right] = batch_3d[1, :, self.joints_right + self.joints_left]
+                    batch_3d[1, :, :, [0, 3, 4]] *= -1
+                    batch_3d[1, :, self.joints_left + self.joints_right] = batch_3d[1, :,
+                                                                           self.joints_right + self.joints_left]
+
+                    batch_3d_input = np.concatenate((batch_3d_input, batch_3d_input), axis=0)
+                    batch_3d_input[1, :, :, [0, 3, 4]] *= -1
+                    batch_3d_input[1, :, self.joints_left_input + self.joints_right_input] = \
+                        batch_3d_input[1, :, self.joints_right_input + self.joints_left_input]
 
                 batch_2d = np.concatenate((batch_2d, batch_2d), axis=0)
                 batch_2d[1, :, :, 0] *= -1
                 batch_2d[1, :, self.kps_left + self.kps_right] = batch_2d[1, :, self.kps_right + self.kps_left]
 
-            yield batch_cam, batch_3d, batch_2d
+            yield batch_cam, batch_3d, batch_2d, batch_3d_input
