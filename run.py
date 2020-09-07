@@ -513,7 +513,6 @@ if not args.evaluate:
                 iter += 1
 
                 optimizer.step()
-                break
 
         loss_3d_train = epoch_loss_3d_train / N
         loss_rot_train = epoch_loss_rot_train / N
