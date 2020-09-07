@@ -345,7 +345,6 @@ if not args.evaluate:
         epoch = checkpoint['epoch']
         if 'optimizer' in checkpoint and checkpoint['optimizer'] is not None:
             optimizer.load_state_dict(checkpoint['optimizer'])
-            train_generator.set_random_state(checkpoint['random_state'])
         else:
             print('WARNING: this checkpoint does not contain an optimizer state. The optimizer will be reinitialized.')
 
@@ -353,7 +352,7 @@ if not args.evaluate:
         if semi_supervised:
             model_traj_train.load_state_dict(checkpoint['model_traj'])
             model_traj.load_state_dict(checkpoint['model_traj'])
-            semi_generator.set_random_state(checkpoint['random_state_semi'])
+
 
     print('** Note: reported losses are averaged over all frames and test-time augmentation is not used here.')
     print('** The final evaluation will be carried out after the last training epoch.')
@@ -702,11 +701,9 @@ if not args.evaluate:
             torch.save({
                 'epoch': epoch,
                 'lr': lr,
-                'random_state': train_generator.random_state(),
                 'optimizer': optimizer.state_dict(),
                 'model_pos': model_pos_train.state_dict(),
                 'model_traj': model_traj_train.state_dict() if semi_supervised else None,
-                'random_state_semi': semi_generator.random_state() if semi_supervised else None,
             }, chk_path)
 
         # Save training curves after every epoch, as .png images (if requested)
