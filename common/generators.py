@@ -231,7 +231,7 @@ class ChunkedGenerator(DataLoader):
                                                shuffle, random_seed,
                                                augment, kps_left, kps_right, joints_left, joints_right,
                                                endless, skeleton)
-        super(ChunkedGenerator, self).__init__(self.dataset, batch_size=batch_size, shuffle=shuffle, num_workers=0,
+        super(ChunkedGenerator, self).__init__(self.dataset, batch_size=batch_size, shuffle=shuffle, num_workers=8,
                                                collate_fn=self.combine)
 
     @staticmethod
