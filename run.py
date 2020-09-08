@@ -522,7 +522,7 @@ if not args.evaluate:
                 epoch_loss_transformed_rot_train += new_n * transformed_loss_3d_rot.item()
                 N += new_n
 
-                loss_total = transformed_loss_3d_pos + transformed_loss_3d_rot
+                loss_total = transformed_loss_3d_pos + transformed_loss_3d_rot + loss_3d_pos + loss_3d_rot
 
                 loss_total.backward()
                 iter += 1
