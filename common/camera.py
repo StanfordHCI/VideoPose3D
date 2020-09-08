@@ -47,12 +47,12 @@ def camera_to_world_rot(q, R):
 
 def only_keep_roll_rot(q):
     q_w = q[..., 0]
-    q_x = q[..., 1]
+    q_x = np.zeros(q[..., 1].shape)
     q_y = np.zeros(q[..., 2].shape)
-    q_z = np.zeros(q[..., 3].shape)
-    q_len = q_w ** 2 + q_x ** 2
+    q_z = q[..., 3]
+    q_len = q_w ** 2 + q_z ** 2
     q_w /= q_len
-    q_x /= q_len
+    q_z /= q_len
     return np.stack((q_w, q_x, q_y, q_z), axis=-1).astype('float32')
 
 
