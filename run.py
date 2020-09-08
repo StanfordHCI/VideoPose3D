@@ -486,15 +486,29 @@ if not args.evaluate:
                 loss_3d_pos = mpjpe(predicted_3d_pos, reference_pos)
                 loss_3d_rot = quat_criterion(predicted_3d_rot, reference_rot)
 
-                predicted_transformed_joints = transform_with_last_item(predicted_3d_pos_rot)
+                predicted_joints = predicted_3d_pos_rot[..., :-1, :]
+                predicted_transforms = predicted_3d_pos_rot[..., -1:, :]
+                reference_joints = inputs_3d[..., :-1, :]
+                reference_transforms = inputs_3d[..., -1:, :]
+                predicted_3d_pos_rot_ref_trans = torch.cat((predicted_joints, reference_transforms), dim=-2)
+                predicted_3d_pos_rot_ref_joint = torch.cat((reference_joints, predicted_transforms), dim=-2)
+                predicted_transformed_joints_ref_trans = transform_with_last_item(predicted_3d_pos_rot_ref_trans)
+                predicted_transformed_joints_ref_joint = transform_with_last_item(predicted_3d_pos_rot_ref_joint)
                 reference_transformed_joints = transform_with_last_item(inputs_3d)
-                transformed_predicted_3d_pos = predicted_transformed_joints[..., :3]
-                transformed_predicted_3d_rot = predicted_transformed_joints[..., 3:]
+                transformed_predicted_3d_pos_trans = predicted_transformed_joints_ref_trans[..., :3]
+                transformed_predicted_3d_rot_trans = predicted_transformed_joints_ref_trans[..., 3:]
+                transformed_predicted_3d_pos_joint = predicted_transformed_joints_ref_joint[..., :3]
+                transformed_predicted_3d_rot_joint = predicted_transformed_joints_ref_joint[..., 3:]
                 transformed_reference_pos = reference_transformed_joints[..., :3]
                 transformed_reference_rot = reference_transformed_joints[..., 3:]
-                transformed_loss_3d_pos = mpjpe(transformed_predicted_3d_pos, transformed_reference_pos)
-                transformed_loss_3d_rot = quat_criterion(transformed_predicted_3d_rot, transformed_reference_rot)
-
+                transformed_loss_3d_pos = (
+                        mpjpe(transformed_predicted_3d_pos_trans, transformed_reference_pos) +
+                        mpjpe(transformed_predicted_3d_pos_joint, transformed_reference_pos)
+                ) / 2
+                transformed_loss_3d_rot = (
+                    quat_criterion(transformed_predicted_3d_rot_trans, transformed_reference_rot) +
+                    quat_criterion(transformed_predicted_3d_rot_joint, transformed_reference_rot)
+                ) / 2
                 writer.add_scalar(f"train/loss_pos", loss_3d_pos, iter)
                 writer.add_scalar(f"train/loss_rot", loss_3d_rot, iter)
                 writer.add_scalar(f"train/loss_transformed_pos", transformed_loss_3d_pos, iter)
@@ -508,7 +522,8 @@ if not args.evaluate:
                 epoch_loss_transformed_rot_train += new_n * transformed_loss_3d_rot.item()
                 N += new_n
 
-                loss_total = loss_3d_pos + loss_3d_rot + transformed_loss_3d_pos + transformed_loss_3d_rot
+                loss_total = transformed_loss_3d_pos + transformed_loss_3d_rot
+
                 loss_total.backward()
                 iter += 1
 
