@@ -82,6 +82,7 @@ for subject in dataset.subjects():
                 only_x_y_t = only_keep_x_y(cam['translation'])
                 pos_rot[:, :, :3] = world_to_camera(pos_rot[:, :, :3], R=only_roll_r, t=only_x_y_t)
                 pos_rot[:, :, 3:] = world_to_camera_quat(pos_rot[:, :, 3:], R=only_roll_r)
+                pos_rot[:, :, :3] -= pos_rot[:, :1, :3]  # Model v2.1 all position is relative to the head
                 # pos_rot[:, 1:, :3] -= pos_rot[:, :1, :3]  # Remove global offset, but keep trajectory in first position
                 positions_3d.append(pos_rot)
             anim['pos_rot'] = positions_3d
@@ -362,7 +363,7 @@ if not args.evaluate:
         else:
             print('WARNING: this checkpoint does not contain an optimizer state. The optimizer will be reinitialized.')
 
-        # lr = checkpoint['lr']
+        lr = checkpoint['lr']
         if semi_supervised:
             model_traj_train.load_state_dict(checkpoint['model_traj'])
             model_traj.load_state_dict(checkpoint['model_traj'])
@@ -538,13 +539,14 @@ if not args.evaluate:
                 epoch_loss_transformed_rot_train += new_n * transformed_loss_3d_rot.item()
                 N += new_n
 
-                risky_loss = transformed_loss_3d_pos + transformed_loss_3d_rot
+                risky_loss = transformed_loss_3d_pos + transformed_loss_3d_rot + loss_3d_pos + loss_3d_rot
+
                 risky_loss.backward(retain_graph=True)
 
                 nan_grad = False
                 for param_dict in optimizer.param_groups:
                     for param in param_dict['params']:
-                        if torch.isnan(param.grad).any():
+                        if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
                             nan_grad = True
                             break
                     if nan_grad:
@@ -556,7 +558,7 @@ if not args.evaluate:
                 else:
                     writer.add_scalar(f"train/clear_risky_loss", 0, iter)
 
-                loss_total = transformed_loss_3d_pos + transformed_loss_3d_rot + loss_3d_pos + loss_3d_rot
+                loss_total = loss_3d_pos + loss_3d_rot
 
                 loss_total.backward()
                 iter += 1
