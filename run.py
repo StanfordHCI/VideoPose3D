@@ -4,6 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 #
+import math
 
 import numpy as np
 
@@ -25,6 +26,7 @@ from common.generators import ChunkedGenerator, UnchunkedGenerator
 from time import time
 from common.utils import deterministic_random
 from data.convert_h36m_to_vr import visual_test
+
 args = parse_args()
 print(args)
 
@@ -43,6 +45,7 @@ print('Loading dataset...')
 dataset_path = 'data/data_3d_' + args.dataset + '.npz'
 if args.dataset == 'h36m_new':
     from common.h36m_dataset import Human36mDataset
+
     dataset = Human36mDataset(dataset_path)
 elif args.dataset.startswith('humaneva'):
     from common.humaneva_dataset import HumanEvaDataset
@@ -83,7 +86,7 @@ for subject in dataset.subjects():
                 positions_3d.append(pos_rot)
             anim['pos_rot'] = positions_3d
 
-writer = SummaryWriter(log_dir="./logs/"+datetime.datetime.now().strftime("%Y%m%dT%H%M%S"))
+writer = SummaryWriter(log_dir="./logs/" + datetime.datetime.now().strftime("%Y%m%dT%H%M%S"))
 # -----------------------------prepare the 2D dataset as input ------------------------------------
 print('Loading 2D detections...')
 keypoints = np.load('data/data_2d_' + args.dataset + '_' + args.keypoints + '.npz', allow_pickle=True)
@@ -167,7 +170,7 @@ def fetch(subjects, action_filter=None, subset=1, parse_3d_poses=True):
                 assert len(poses_3d) == len(poses_2d), 'Camera count mismatch'
                 for i in range(len(poses_3d)):  # Iterate across cameras
                     out_poses_3d.append(poses_3d[i])
-    #print(out_poses_3d[0][0:2,:,:])
+    # print(out_poses_3d[0][0:2,:,:])
     if len(out_camera_params) == 0:
         out_camera_params = None
     if len(out_poses_3d) == 0:
@@ -337,7 +340,8 @@ if not args.evaluate:
                                        kps_left=kps_left, kps_right=kps_right, joints_left=joints_left,
                                        joints_right=joints_right, skeleton=dataset.skeleton())
     train_generator_eval = UnchunkedGenerator(cameras_train, poses_train, poses_train_2d,
-                                              pad=pad, causal_shift=causal_shift, augment=False, skeleton=dataset.skeleton())
+                                              pad=pad, causal_shift=causal_shift, augment=False,
+                                              skeleton=dataset.skeleton())
     print('INFO: Training on {} frames'.format(train_generator_eval.num_frames()))
     if semi_supervised:
         semi_generator = ChunkedGenerator(args.batch_size // args.stride, cameras_semi, None, poses_semi_2d,
@@ -358,16 +362,17 @@ if not args.evaluate:
         else:
             print('WARNING: this checkpoint does not contain an optimizer state. The optimizer will be reinitialized.')
 
-        lr = checkpoint['lr']
+        # lr = checkpoint['lr']
         if semi_supervised:
             model_traj_train.load_state_dict(checkpoint['model_traj'])
             model_traj.load_state_dict(checkpoint['model_traj'])
 
-
     print('** Note: reported losses are averaged over all frames and test-time augmentation is not used here.')
     print('** The final evaluation will be carried out after the last training epoch.')
 
-    iter = 0
+    # torch.autograd.set_detect_anomaly(True)
+
+    iter = epoch * int(math.ceil(len(train_generator.dataset) / (args.batch_size // args.stride)))
     # Pos model only
     while epoch < args.epochs:
         start_time = time()
@@ -494,25 +499,36 @@ if not args.evaluate:
                 predicted_3d_pos_rot_ref_joint = torch.cat((reference_joints, predicted_transforms), dim=-2)
                 predicted_transformed_joints_ref_trans = transform_with_last_item(predicted_3d_pos_rot_ref_trans)
                 predicted_transformed_joints_ref_joint = transform_with_last_item(predicted_3d_pos_rot_ref_joint)
+                predicted_transformed_joints = transform_with_last_item(predicted_3d_pos_rot)
                 reference_transformed_joints = transform_with_last_item(inputs_3d)
                 transformed_predicted_3d_pos_trans = predicted_transformed_joints_ref_trans[..., :3]
                 transformed_predicted_3d_rot_trans = predicted_transformed_joints_ref_trans[..., 3:]
                 transformed_predicted_3d_pos_joint = predicted_transformed_joints_ref_joint[..., :3]
                 transformed_predicted_3d_rot_joint = predicted_transformed_joints_ref_joint[..., 3:]
+                transformed_predicted_3d_pos = predicted_transformed_joints[..., :3]
+                transformed_predicted_3d_rot = predicted_transformed_joints[..., 3:]
                 transformed_reference_pos = reference_transformed_joints[..., :3]
                 transformed_reference_rot = reference_transformed_joints[..., 3:]
-                transformed_loss_3d_pos = (
-                        mpjpe(transformed_predicted_3d_pos_trans, transformed_reference_pos) +
-                        mpjpe(transformed_predicted_3d_pos_joint, transformed_reference_pos)
-                ) / 2
-                transformed_loss_3d_rot = (
-                    quat_criterion(transformed_predicted_3d_rot_trans, transformed_reference_rot) +
-                    quat_criterion(transformed_predicted_3d_rot_joint, transformed_reference_rot)
-                ) / 2
+                transformed_loss_3d_pos_ref = (
+                                                      mpjpe(transformed_predicted_3d_pos_trans,
+                                                            transformed_reference_pos) +
+                                                      mpjpe(transformed_predicted_3d_pos_joint,
+                                                            transformed_reference_pos)
+                                              ) / 2
+                transformed_loss_3d_rot_ref = (
+                                                      quat_criterion(transformed_predicted_3d_rot_trans,
+                                                                     transformed_reference_rot) +
+                                                      quat_criterion(transformed_predicted_3d_rot_joint,
+                                                                     transformed_reference_rot)
+                                              ) / 2
+                transformed_loss_3d_pos = mpjpe(transformed_predicted_3d_pos, transformed_reference_pos)
+                transformed_loss_3d_rot = quat_criterion(transformed_predicted_3d_rot, transformed_reference_rot)
                 writer.add_scalar(f"train/loss_pos", loss_3d_pos, iter)
                 writer.add_scalar(f"train/loss_rot", loss_3d_rot, iter)
-                writer.add_scalar(f"train/loss_transformed_pos", transformed_loss_3d_pos, iter)
-                writer.add_scalar(f"train/loss_transformed_rot", transformed_loss_3d_rot, iter)
+                writer.add_scalar(f"train/loss_transformed_pos", transformed_loss_3d_pos_ref, iter)
+                writer.add_scalar(f"train/loss_transformed_rot", transformed_loss_3d_rot_ref, iter)
+                writer.add_scalar(f"train/loss_transformed_pos_full", transformed_loss_3d_pos, iter)
+                writer.add_scalar(f"train/loss_transformed_rot_full", transformed_loss_3d_rot, iter)
 
                 new_n = inputs_3d.shape[0] * inputs_3d.shape[1]
                 epoch_loss_3d_train += new_n * loss_3d_pos.item()
@@ -521,6 +537,24 @@ if not args.evaluate:
                 epoch_loss_transformed_3d_train += new_n * transformed_loss_3d_pos.item()
                 epoch_loss_transformed_rot_train += new_n * transformed_loss_3d_rot.item()
                 N += new_n
+
+                risky_loss = transformed_loss_3d_pos + transformed_loss_3d_rot
+                risky_loss.backward(retain_graph=True)
+
+                nan_grad = False
+                for param_dict in optimizer.param_groups:
+                    for param in param_dict['params']:
+                        if torch.isnan(param.grad).any():
+                            nan_grad = True
+                            break
+                    if nan_grad:
+                        break
+
+                if nan_grad:
+                    optimizer.zero_grad()
+                    writer.add_scalar(f"train/clear_risky_loss", 1, iter)
+                else:
+                    writer.add_scalar(f"train/clear_risky_loss", 0, iter)
 
                 loss_total = transformed_loss_3d_pos + transformed_loss_3d_rot + loss_3d_pos + loss_3d_rot
 
@@ -864,7 +898,7 @@ def evaluate(test_generator, action=None, return_predictions=False, use_trajecto
                 predicted_3d_pos_rot[1, :, :, [0, 3, 4]] *= -1
                 if not use_trajectory_model:
                     predicted_3d_pos_rot[1, :, joints_left + joints_right] = predicted_3d_pos[1, :,
-                                                                         joints_right + joints_left]
+                                                                             joints_right + joints_left]
                 predicted_3d_pos_rot = torch.mean(predicted_3d_pos_rot, dim=0, keepdim=True)
 
             if return_predictions:
