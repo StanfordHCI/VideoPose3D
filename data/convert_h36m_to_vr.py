@@ -30,7 +30,7 @@ def convert_h36m_cdf_to_pos_rot(cdf: cdflib.CDF) -> (np.ndarray, np.ndarray):
     right_hand_center = (right_wrist + right_hand_top) / 2
     hip_center = poses[:, 11]
     shoulder_center = poses[:, 13]
-    waist_real_center = poses[:, 12]
+    waist_real_center = (hip_center + shoulder_center) / 2
     waist_up = shoulder_center - waist_real_center
     waist_center = (waist_real_center + hip_center) / 2
     left_hip = poses[:, 6]
