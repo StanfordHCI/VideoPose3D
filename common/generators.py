@@ -144,7 +144,7 @@ class ChunkedGeneratorDataset(Dataset):
             batch_3d_extra: as input
        """
         seq_i, start_3d, end_3d, flip = self.pairs[item]
-        transform_t = random_x_y_shift([])  # generate a random transform
+        transform_t = np.zeros((1, 3))  # generate a random transform
         transform_q = random_z_rot([])
         start_2d = start_3d - self.pad - self.causal_shift
         end_2d = end_3d + self.pad - self.causal_shift
@@ -340,7 +340,7 @@ class UnchunkedGenerator:
                                                                                       (0, 0)),
                                                                                      'edge'), axis=0)
             # generate random transform
-            transform_t = random_x_y_shift([])
+            transform_t = np.zeros((1, 3))
             transform_q = random_z_rot([])
 
             # apply random transform
