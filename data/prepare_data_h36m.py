@@ -22,7 +22,7 @@ from common.h36m_dataset import Human36mDataset
 from common.camera import world_to_camera, project_to_2d, image_coordinates
 from common.utils import wrap
 
-output_filename = 'data_3d_h36m_new'
+output_filename = 'data_3d_h36m_new2'
 output_filename_2d = 'data_2d_h36m_gt'
 subjects = ['S1', 'S5', 'S6', 'S7', 'S8', 'S9', 'S11']
 
@@ -121,7 +121,9 @@ if __name__ == '__main__':
         import cdflib
         
         for subject in subjects:
+            print(f"Subject {subject}")
             output[subject] = {}
+            saved_lengths = []
             file_list = glob(args.from_source_cdf + '/' + subject + '/MyPoseFeatures/D3_Positions/*.cdf')
             assert len(file_list) == 30, "Expected 30 files for subject " + subject + ", got " + str(len(file_list))
             for f in file_list:
@@ -135,9 +137,13 @@ if __name__ == '__main__':
                                        .replace('WalkingDog', 'WalkDog')
                 
                 hf = cdflib.CDF(f)
-                positions = convert_h36m_cdf_to_pos_rot(hf)  # (time, joint [6], 7 numbers[pos + rot])
+                positions, lengths = convert_h36m_cdf_to_pos_rot(hf)  # (time, joint [6], 7 numbers[pos + rot])
                 output[subject][canonical_name] = positions.astype('float32')
-        
+                saved_lengths += [lengths]
+
+            avg_lengths = np.mean(saved_lengths, axis=0)
+            output[subject]["lengths"] = avg_lengths
+
         print('Saving...')
         np.savez_compressed(output_filename, pos_rot=output)
         
