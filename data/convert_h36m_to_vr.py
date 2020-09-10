@@ -3,7 +3,7 @@ import quaternion
 import numpy as np
 
 
-def convert_h36m_cdf_to_pos_rot(cdf: cdflib.CDF) -> list:
+def convert_h36m_cdf_to_pos_rot(cdf: cdflib.CDF) -> (np.ndarray, np.ndarray):
     poses = cdf['Pose']  # 1 x n x 96
     poses = poses.reshape((poses.shape[1], poses.shape[2] // 3, 3))  # 1 x n x 32 x 3
     print(poses.shape[0])
@@ -29,22 +29,54 @@ def convert_h36m_cdf_to_pos_rot(cdf: cdflib.CDF) -> list:
     right_hand_top = poses[:, 30]
     right_hand_center = (right_wrist + right_hand_top) / 2
     hip_center = poses[:, 11]
-    waist_real_center = poses[:, 12]
     shoulder_center = poses[:, 13]
+    waist_real_center = poses[:, 12]
     waist_up = shoulder_center - waist_real_center
     waist_center = (waist_real_center + hip_center) / 2
-    hip_right = poses[:, 1] - poses[:, 6]
-    shoulder_right = poses[:, 25] - poses[:, 17]  # this may be incorrect
+    left_hip = poses[:, 6]
+    right_hip = poses[:, 1]
+    hip_right = right_hip - left_hip
+    left_shoulder = poses[:, 17]
+    right_shoulder = poses[:, 25]
+    shoulder_right = right_shoulder - left_shoulder  # this may be incorrect
     waist_right = hip_right * 2 + shoulder_right  # more emphasis on hip
     waist_front = np.cross(waist_up, waist_right)
-    left_ankle = poses[:, 3]
-    left_toe = poses[:, 5]
-    left_knee = poses[:, 2]
+    left_ankle = poses[:, 8]
+    left_toe = poses[:, 10]
+    left_knee = poses[:, 7]
     left_foot_center = (left_ankle + left_toe) / 2
-    right_ankle = poses[:, 8]
-    right_toe = poses[:, 10]
+    right_ankle = poses[:, 3]
+    right_toe = poses[:, 5]
     right_knee = poses[:, 2]
     right_foot_center = (right_ankle + right_toe) / 2
+
+    def vec_len(vec):
+        length = np.linalg.norm(vec, axis=1, keepdims=True)
+        return np.mean(length)
+
+    # Model v2.1 body metric
+    nose_neck = vec_len(head_center - shoulder_center)
+    shoulder_length = vec_len(shoulder_right)
+    left_elbow = poses[:, 18]
+    left_shoulder_elbow = vec_len(left_shoulder - left_elbow)
+    left_elbow_wrist = vec_len(left_elbow - left_wrist)
+    right_elbow = poses[:, 26]
+    right_shoulder_elbow = vec_len(right_shoulder - right_elbow)
+    right_elbow_wrist = vec_len(right_elbow - right_wrist)
+    shoulder_hip = vec_len(shoulder_center - hip_center)
+    hip_length = vec_len(hip_right)
+    left_hip_knee = vec_len(left_hip - left_knee)
+    left_knee_ankle = vec_len(left_knee - left_ankle)
+    left_ankle_foot = vec_len(left_ankle - left_foot_center)
+    right_hip_knee = vec_len(right_hip - right_knee)
+    right_knee_ankle = vec_len(right_knee - right_ankle)
+    right_ankle_foot = vec_len(right_ankle - right_foot_center)
+    output_lengths = [nose_neck, shoulder_length, shoulder_hip, hip_length,
+                      left_shoulder_elbow, right_shoulder_elbow,
+                      left_elbow_wrist, right_elbow_wrist,
+                      left_hip_knee, right_hip_knee,
+                      left_knee_ankle, right_knee_ankle,
+                      left_ankle_foot, right_ankle_foot]
 
     # %%
     def normalize(vec):
@@ -85,7 +117,7 @@ def convert_h36m_cdf_to_pos_rot(cdf: cdflib.CDF) -> list:
     outputs = np.concatenate((head_info, left_hand_info, right_hand_info, waist_info, left_foot_info, right_foot_info),
                              axis=1)
     # print(head_info.shape, outputs.shape)
-    return outputs
+    return outputs, output_lengths
 
 
 def visual_test(pos_3d):
@@ -104,7 +136,7 @@ def visual_test(pos_3d):
         plt.plot(*zip(pos, right_vec), zdir='z', c='red')
 
     def draw_bone(pos_a: np.ndarray, pos_b: np.ndarray, c='black'):
-        plt.plot(*zip(pos_a, pos_b), zdir='z', c='black')
+        plt.plot(*zip(pos_a, pos_b), zdir='z', c=c)
 
     parents = [-1, 0, 1, 2, 3, 4, 0, 6, 7, 8, 9, 0, 11, 12, 13, 14, 12,
                16, 17, 18, 19, 20, 19, 22, 12, 24, 25, 26, 27, 28, 27, 30]
