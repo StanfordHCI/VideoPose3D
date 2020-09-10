@@ -41,7 +41,7 @@ except OSError as e:
 # -----------------------------prepare the 3D dataset as ground truth ------------------------------------
 print('Loading dataset...')
 dataset_path = 'data/data_3d_' + args.dataset + '.npz'
-if args.dataset == 'h36m_new':
+if args.dataset == 'h36m_new2':
     from common.h36m_dataset import Human36mDataset
     dataset = Human36mDataset(dataset_path)
 elif args.dataset.startswith('humaneva'):
@@ -59,7 +59,10 @@ print('Preparing data...')
 
 # Model v1.5: Do not apply camera transformation
 for subject in dataset.subjects():
+    lengths = dataset[subject]['lengths']
     for action in dataset[subject].keys():
+        if action == "lengths":
+            continue
         anim = dataset[subject][action]
 
         if 'positions' in anim:
@@ -78,6 +81,7 @@ for subject in dataset.subjects():
                 # pos_rot[:, 1:, :3] -= pos_rot[:, :1, :3]  # Remove global offset, but keep trajectory in first position
                 positions_3d.append(pos_rot)
             anim['pos_rot'] = positions_3d
+        anim['lengths'] = lengths
 
 writer = SummaryWriter(log_dir="./logs/"+datetime.datetime.now().strftime("%Y%m%dT%H%M%S"))
 # -----------------------------prepare the 2D dataset as input ------------------------------------
