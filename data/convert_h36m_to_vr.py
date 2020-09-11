@@ -16,7 +16,7 @@ def convert_h36m_cdf_to_pos_rot(cdf: cdflib.CDF) -> list:
             dot_last_axis(point - line_a, line_b - line_a) / dot_last_axis(line_b - line_a, line_b - line_a), 1)
         return line_a + point_k * (line_b - line_a)
 
-    head_top = poses[:, 15]  # 1 x n x 3
+head_top = poses[:, 15]  # 1 x n x 3
     face = poses[:, 14]
     neck = poses[:, 13]
     head_center = project_to_line(face, neck, head_top)
@@ -29,24 +29,23 @@ def convert_h36m_cdf_to_pos_rot(cdf: cdflib.CDF) -> list:
     right_hand_top = poses[:, 30]
     right_hand_center = (right_wrist + right_hand_top) / 2
     hip_center = poses[:, 11]
-    waist_real_center = poses[:, 12]
     shoulder_center = poses[:, 13]
+    waist_real_center = (hip_center + shoulder_center) / 2
     waist_up = shoulder_center - waist_real_center
     waist_center = (waist_real_center + hip_center) / 2
     hip_right = poses[:, 1] - poses[:, 6]
     shoulder_right = poses[:, 25] - poses[:, 17]  # this may be incorrect
     waist_right = hip_right * 2 + shoulder_right  # more emphasis on hip
     waist_front = np.cross(waist_up, waist_right)
-    left_ankle = poses[:, 3]
-    left_toe = poses[:, 5]
-    left_knee = poses[:, 2]
+    left_ankle = poses[:, 8]
+    left_toe = poses[:, 10]
+    left_knee = poses[:, 7]
     left_foot_center = (left_ankle + left_toe) / 2
-    right_ankle = poses[:, 8]
-    right_toe = poses[:, 10]
+    right_ankle = poses[:, 3]
+    right_toe = poses[:, 5]
     right_knee = poses[:, 2]
-    right_foot_center = (right_ankle + right_toe) / 2
-
-    # %%
+    right_foot_center = (right_ankle + right_toe) / 2# %%
+    
     def normalize(vec):
         return vec / np.linalg.norm(vec, axis=1, keepdims=True)
 
