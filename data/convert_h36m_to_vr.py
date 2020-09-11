@@ -16,7 +16,7 @@ def convert_h36m_cdf_to_pos_rot(cdf: cdflib.CDF) -> list:
             dot_last_axis(point - line_a, line_b - line_a) / dot_last_axis(line_b - line_a, line_b - line_a), 1)
         return line_a + point_k * (line_b - line_a)
 
-head_top = poses[:, 15]  # 1 x n x 3
+    head_top = poses[:, 15]  # 1 x n x 3
     face = poses[:, 14]
     neck = poses[:, 13]
     head_center = project_to_line(face, neck, head_top)

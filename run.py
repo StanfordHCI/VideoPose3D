@@ -353,6 +353,7 @@ if not args.evaluate:
     iter = 0
     # Pos model only
     while epoch < args.epochs:
+        if iter >= 1: break
         start_time = time()
         epoch_loss_3d_train = 0
         epoch_loss_rot_train = 0
