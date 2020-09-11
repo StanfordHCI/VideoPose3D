@@ -26,7 +26,7 @@ def extract_3d(poses_3d, input_joints, output_joints):
         poses_3d_output.append(poses_3d[i][:, output_joints, :])
     return poses_3d_output, poses_3d_input
 
-@profile
+#@profile
 def convert_to_vr(orig_data, t, q):
     orig_data_size = list(orig_data.shape[:-1]) + [1]
     if type(orig_data) is torch.Tensor:
@@ -179,7 +179,7 @@ class ChunkedGeneratorDataset(Dataset):
     def __len__(self):
         return len(self.pairs)
 
-    @profile
+    #@profile
     def __getitem__(self, item) -> (torch.Tensor, torch.Tensor, np.array, np.array):
         """
         Get next training data

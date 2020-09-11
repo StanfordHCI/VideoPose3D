@@ -70,21 +70,21 @@ def random_x_y_shift(size: list, x_start=-2, x_end=2, y_start=-2, y_end=2) -> np
     vec_z = np.zeros(size + [1])
     return np.stack((vec_x, vec_y, vec_z), axis=-1).astype('float32')
 
-@profile
+#@profile
 def apply_transform(x, r, t) -> Union[np.array, torch.Tensor]:
     if type(x) is torch.Tensor:
         return qrot(r, x) + t
     else:
         return wrap(qrot, r, x) + t
 
-@profile
+#@profile
 def apply_transform_rot(q, r) -> Union[np.array, torch.Tensor]:
     if type(q) is torch.Tensor:
         return q_multiply(r, q)
     else:
         return wrap(q_multiply, r, q)
 
-@profile
+#@profile
 def apply_transform_combined(xq, r, t) -> Union[np.array, torch.Tensor]:
     """
     Apply offset and rotation to a list of positions and rotations

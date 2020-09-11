@@ -37,7 +37,7 @@ def qinverse(q, inplace=False):
         xyz = q[..., 1:]
         return torch.cat((w, -xyz), dim=len(q.shape)-1)
 
-@profile
+#@profile
 def q_multiply(q1, q2):
     # return torch.stack((
     #     q1[..., 0] * q2[..., 0] - q1[..., 1] * q2[..., 1] - q1[..., 2] * q2[..., 2] - q1[..., 3] * q2[..., 3],
