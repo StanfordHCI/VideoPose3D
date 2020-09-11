@@ -70,6 +70,7 @@ for subject in dataset.subjects():
             for cam in anim['cameras']:
                 pos_rot = anim['pos_rot'].copy()
                 pos_rot[:, :, :3] = world_to_camera(pos_rot[:, :, :3], R=cam['orientation'], t=cam['translation'])
+                pos_rot[:, :, 3:] = world_to_camera_quat(pos_rot[:, :, 3:], R=cam['orientation'])
                 pos_rot[:, 1:, :3] -= pos_rot[:, :1, :3]  # Remove global offset, but keep trajectory in first position
                 positions_3d.append(pos_rot)
             anim['pos_rot'] = positions_3d
