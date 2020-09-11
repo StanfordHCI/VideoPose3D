@@ -123,7 +123,6 @@ if __name__ == '__main__':
         for subject in subjects:
             print(f"Subject {subject}")
             output[subject] = {}
-            saved_lengths = []
             file_list = glob(args.from_source_cdf + '/' + subject + '/MyPoseFeatures/D3_Positions/*.cdf')
             assert len(file_list) == 30, "Expected 30 files for subject " + subject + ", got " + str(len(file_list))
             for f in file_list:
@@ -137,12 +136,8 @@ if __name__ == '__main__':
                                        .replace('WalkingDog', 'WalkDog')
                 
                 hf = cdflib.CDF(f)
-                positions, lengths = convert_h36m_cdf_to_pos_rot(hf)  # (time, joint [6], 7 numbers[pos + rot])
-                output[subject][canonical_name] = positions.astype('float32')
-                saved_lengths += [lengths]
-
-            avg_lengths = np.mean(saved_lengths, axis=0)
-            output[subject]["lengths"] = avg_lengths
+                positions, skeletons, bone_lengths = convert_h36m_cdf_to_pos_rot(hf)  # (time, joint [6], 7 numbers[pos + rot])
+                output[subject][canonical_name] = positions.astype('float32'), skeletons, bone_lengths
 
         print('Saving...')
         np.savez_compressed(output_filename, pos_rot=output)

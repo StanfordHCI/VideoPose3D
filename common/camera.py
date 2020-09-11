@@ -4,6 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 #
+from typing import Union
 
 import numpy as np
 import torch
@@ -69,16 +70,22 @@ def random_x_y_shift(size: list, x_start=-2, x_end=2, y_start=-2, y_end=2) -> np
     vec_z = np.zeros(size + [1])
     return np.stack((vec_x, vec_y, vec_z), axis=-1).astype('float32')
 
+@profile
+def apply_transform(x, r, t) -> Union[np.array, torch.Tensor]:
+    if type(x) is torch.Tensor:
+        return qrot(r, x) + t
+    else:
+        return wrap(qrot, r, x) + t
 
-def apply_transform(x, r, t):
-    return wrap(qrot, r, x) + t
+@profile
+def apply_transform_rot(q, r) -> Union[np.array, torch.Tensor]:
+    if type(q) is torch.Tensor:
+        return q_multiply(r, q)
+    else:
+        return wrap(q_multiply, r, q)
 
-
-def apply_transform_rot(q, r):
-    return wrap(q_multiply, r, q)
-
-
-def apply_transform_combined(xq, r, t) -> np.array:
+@profile
+def apply_transform_combined(xq, r, t) -> Union[np.array, torch.Tensor]:
     """
     Apply offset and rotation to a list of positions and rotations
     Please make sure the first few axis of `xq`, `r`, and `t` have matched shape
@@ -89,7 +96,10 @@ def apply_transform_combined(xq, r, t) -> np.array:
     old_q = xq[..., 3:]
     new_x = apply_transform(old_x, r, t)
     new_q = apply_transform_rot(old_q, r)
-    return np.concatenate((new_x, new_q), axis=-1)
+    if type(new_x) is torch.Tensor:
+        return torch.cat((new_x, new_q), dim=-1)
+    else:
+        return np.concatenate((new_x, new_q), axis=-1)
 
 
 def project_to_2d(X, camera_params):

@@ -7,6 +7,7 @@
 
 import torch
 import torchgeometry
+import kornia
 
 
 def qrot(q, v):
@@ -36,15 +37,23 @@ def qinverse(q, inplace=False):
         xyz = q[..., 1:]
         return torch.cat((w, -xyz), dim=len(q.shape)-1)
 
-
+@profile
 def q_multiply(q1, q2):
-    return torch.stack((
-        q1[..., 0] * q2[..., 0] - q1[..., 1] * q2[..., 1] - q1[..., 2] * q2[..., 2] - q1[..., 3] * q2[..., 3],
-        q1[..., 0] * q2[..., 1] + q1[..., 1] * q2[..., 0] + q1[..., 2] * q2[..., 3] - q1[..., 3] * q2[..., 2],
-        q1[..., 0] * q2[..., 2] - q1[..., 1] * q2[..., 3] + q1[..., 2] * q2[..., 0] + q1[..., 3] * q2[..., 1],
-        q1[..., 0] * q2[..., 3] + q1[..., 1] * q2[..., 2] - q1[..., 2] * q2[..., 1] + q1[..., 3] * q2[..., 0],
-    ), dim=-1)
+    # return torch.stack((
+    #     q1[..., 0] * q2[..., 0] - q1[..., 1] * q2[..., 1] - q1[..., 2] * q2[..., 2] - q1[..., 3] * q2[..., 3],
+    #     q1[..., 0] * q2[..., 1] + q1[..., 1] * q2[..., 0] + q1[..., 2] * q2[..., 3] - q1[..., 3] * q2[..., 2],
+    #     q1[..., 0] * q2[..., 2] - q1[..., 1] * q2[..., 3] + q1[..., 2] * q2[..., 0] + q1[..., 3] * q2[..., 1],
+    #     q1[..., 0] * q2[..., 3] + q1[..., 1] * q2[..., 2] - q1[..., 2] * q2[..., 1] + q1[..., 3] * q2[..., 0],
+    # ), dim=-1)
+    aw, ax, ay, az = torch.unbind(q1, -1)
+    bw, bx, by, bz = torch.unbind(q2, -1)
+    ow = aw * bw - ax * bx - ay * by - az * bz
+    ox = aw * bx + ax * bw + ay * bz - az * by
+    oy = aw * by - ax * bz + ay * bw + az * bx
+    oz = aw * bz + ax * by - ay * bx + az * bw
+    return torch.stack((ow, ox, oy, oz), -1)
 
 
 def quat_to_rot_mat(quat):
     return torchgeometry.angle_axis_to_rotation_matrix(torchgeometry.quaternion_to_angle_axis(quat))
+    # return kornia.quaternion_to_rotation_matrix(quat)

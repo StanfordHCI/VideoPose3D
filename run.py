@@ -25,6 +25,8 @@ from common.generators import ChunkedGenerator, UnchunkedGenerator
 from time import time
 from common.utils import deterministic_random
 from data.convert_h36m_to_vr import visual_test
+from data.skeleton_scale import SkeletonScale
+
 args = parse_args()
 print(args)
 
@@ -59,29 +61,36 @@ print('Preparing data...')
 
 # Model v1.5: Do not apply camera transformation
 for subject in dataset.subjects():
-    lengths = dataset[subject]['lengths']
     for action in dataset[subject].keys():
         if action == "lengths":
             continue
         anim = dataset[subject][action]
 
         if 'positions' in anim:
-            positions_3d = []
+            pos_rot_array = []
             for cam in anim['cameras']:
                 pos_3d = world_to_camera(anim['positions'], R=cam['orientation'], t=cam['translation'])
                 pos_3d[:, 1:] -= pos_3d[:, :1]  # Remove global offset, but keep trajectory in first position
-                positions_3d.append(pos_3d)
-            anim['pos_rot'] = positions_3d
+                pos_rot_array.append(pos_3d)
+            anim['pos_rot'] = pos_rot_array
 
         if 'pos_rot' in anim:
-            positions_3d = []
+            pos_rot_array = []
+            pos_array = []
+            length_array = []
             for cam in anim['cameras']:
-                pos_rot = anim['pos_rot'].copy()
+                pos_rot, pos, length = anim['pos_rot']
+                pos_rot = pos_rot.copy()
+                pos = pos.copy()
                 # pos_rot[:, :, :3] = world_to_camera(pos_rot[:, :, :3], R=cam['orientation'], t=cam['translation'])
                 pos_rot[:, :, :2] -= pos_rot[:, :1, :2]  # Remove global offset
-                positions_3d.append(pos_rot)
-            anim['pos_rot'] = positions_3d
-        anim['lengths'] = lengths
+                pos[:, :, :2] -= pos[:, :1, :2]  # Remove global offset
+                pos_rot_array.append(pos_rot.astype('float32'))
+                pos_array.append(pos.astype('float32'))
+                length_array.append(length.astype('float32'))
+            anim['pos_rot'] = pos_rot_array
+            anim['pos'] = pos_array
+            anim['length'] = length_array
 
 writer = SummaryWriter(log_dir="./logs/"+datetime.datetime.now().strftime("%Y%m%dT%H%M%S"))
 # -----------------------------prepare the 2D dataset as input ------------------------------------
@@ -98,20 +107,20 @@ for subject in dataset.subjects():
     for action in dataset[subject].keys():
         assert action in keypoints[subject], 'Action {} of subject {} is missing from the 2D detections dataset'.format(
             action, subject)
-        if 'pos_rot' not in dataset[subject][action]:
+        if 'pos' not in dataset[subject][action]:
             continue
 
         for cam_idx in range(len(keypoints[subject][action])):
 
             # We check for >= instead of == because some videos in H3.6M contain extra frames
-            mocap_length = dataset[subject][action]['pos_rot'][cam_idx].shape[0]
+            mocap_length = dataset[subject][action]['pos'][cam_idx].shape[0]
             assert keypoints[subject][action][cam_idx].shape[0] >= mocap_length
 
             if keypoints[subject][action][cam_idx].shape[0] > mocap_length:
                 # Shorten sequence
                 keypoints[subject][action][cam_idx] = keypoints[subject][action][cam_idx][:mocap_length]
 
-        assert len(keypoints[subject][action]) == len(dataset[subject][action]['pos_rot'])
+        assert len(keypoints[subject][action]) == len(dataset[subject][action]['pos'])
 
 # -----------------------------normalize the 2D input ------------------------------------
 for subject in keypoints.keys():
@@ -140,6 +149,7 @@ def fetch(subjects, action_filter=None, subset=1, parse_3d_poses=True):
     out_poses_3d = []
     out_poses_2d = []
     out_camera_params = []
+    out_lengths = []
     for subject in subjects:
         for action in keypoints[subject].keys():
             if action_filter is not None:
@@ -162,11 +172,13 @@ def fetch(subjects, action_filter=None, subset=1, parse_3d_poses=True):
                     if 'intrinsic' in cam:
                         out_camera_params.append(cam['intrinsic'])
 
-            if parse_3d_poses and 'pos_rot' in dataset[subject][action]:
-                poses_3d = dataset[subject][action]['pos_rot']
+            if parse_3d_poses and 'pos' in dataset[subject][action]:
+                poses_3d = dataset[subject][action]['pos']
+                length = dataset[subject][action]['length']
                 assert len(poses_3d) == len(poses_2d), 'Camera count mismatch'
                 for i in range(len(poses_3d)):  # Iterate across cameras
                     out_poses_3d.append(poses_3d[i])
+                    out_lengths.append(length[i])
     #print(out_poses_3d[0][0:2,:,:])
     if len(out_camera_params) == 0:
         out_camera_params = None
@@ -188,7 +200,7 @@ def fetch(subjects, action_filter=None, subset=1, parse_3d_poses=True):
             if out_poses_3d is not None:
                 out_poses_3d[i] = out_poses_3d[i][::stride]
 
-    return out_camera_params, out_poses_3d, out_poses_2d
+    return out_camera_params, out_poses_3d, out_poses_2d, out_lengths
 
 
 action_filter = None if args.actions == '*' else args.actions.split(',')
@@ -196,27 +208,27 @@ if action_filter is not None:
     print('Selected actions:', action_filter)
 
 # -----------------------------load the deep learning modelf------------------------------------
-cameras_valid, poses_valid, poses_valid_2d = fetch(subjects_test, action_filter)
+cameras_valid, poses_valid, poses_valid_2d, length_valid = fetch(subjects_test, action_filter)
 
 filter_widths = [int(x) for x in args.architecture.split(',')]
 if not args.disable_optimizations and not args.dense and args.stride == 1:
     # Use optimized model for single-frame predictions
     model_pos_train = TemporalModelOptimized1f(poses_valid_2d[0].shape[-2], poses_valid_2d[0].shape[-1],
-                                               len(dataset.skeleton().input_joints()), 7,
+                                               len(dataset.skeleton().input_joints()), 7, SkeletonScale.count,
                                                len(dataset.skeleton().output_joints()),
                                                filter_widths=filter_widths, causal=args.causal, dropout=args.dropout,
                                                channels=args.channels)
 else:
     # When incompatible settings are detected (stride > 1, dense filters, or disabled optimization) fall back to normal model
     model_pos_train = TemporalModel(poses_valid_2d[0].shape[-2], poses_valid_2d[0].shape[-1],
-                                    len(dataset.skeleton().input_joints()), 7,
+                                    len(dataset.skeleton().input_joints()), 7, SkeletonScale.count,
                                     len(dataset.skeleton().output_joints()),
                                     filter_widths=filter_widths, causal=args.causal, dropout=args.dropout,
                                     channels=args.channels,
                                     dense=args.dense)
 
 model_pos = TemporalModel(poses_valid_2d[0].shape[-2], poses_valid_2d[0].shape[-1],
-                          len(dataset.skeleton().input_joints()), 7,
+                          len(dataset.skeleton().input_joints()), 7, SkeletonScale.count,
                           len(dataset.skeleton().output_joints()),
                           filter_widths=filter_widths, causal=args.causal, dropout=args.dropout, channels=args.channels,
                           dense=args.dense)
@@ -262,7 +274,7 @@ if args.resume or args.evaluate:
         model_traj = None
 
 # TODO: make sure symmetry is correct
-test_generator = UnchunkedGenerator(cameras_valid, poses_valid, poses_valid_2d,
+test_generator = UnchunkedGenerator(cameras_valid, poses_valid, poses_valid_2d, length_valid,
                                     pad=pad, causal_shift=causal_shift, augment=False,
                                     kps_left=kps_left, kps_right=kps_right, joints_left=joints_left,
                                     joints_right=joints_right, skeleton=dataset.skeleton())
@@ -271,7 +283,7 @@ print('INFO: Testing on {} frames'.format(test_generator.num_frames()))
 # -----------------------------Begin training------------------------------------
 
 if not args.evaluate:
-    cameras_train, poses_train, poses_train_2d = fetch(subjects_train, action_filter, subset=args.subset)
+    cameras_train, poses_train, poses_train_2d, lengths_train = fetch(subjects_train, action_filter, subset=args.subset)
 
     lr = args.learning_rate
     if semi_supervised:
@@ -326,11 +338,11 @@ if not args.evaluate:
     # ---------------------------- data generator ----------------------------
 
     train_generator = ChunkedGenerator(args.batch_size // args.stride, cameras_train, poses_train, poses_train_2d,
-                                       args.stride,
+                                       lengths_train, args.stride,
                                        pad=pad, causal_shift=causal_shift, shuffle=True, augment=args.data_augmentation,
                                        kps_left=kps_left, kps_right=kps_right, joints_left=joints_left,
                                        joints_right=joints_right, skeleton=dataset.skeleton())
-    train_generator_eval = UnchunkedGenerator(cameras_train, poses_train, poses_train_2d,
+    train_generator_eval = UnchunkedGenerator(cameras_train, poses_train, poses_train_2d, lengths_train,
                                               pad=pad, causal_shift=causal_shift, augment=False, skeleton=dataset.skeleton())
     print('INFO: Training on {} frames'.format(train_generator_eval.num_frames()))
     if semi_supervised:
@@ -457,20 +469,22 @@ if not args.evaluate:
         # -------------------------- without semi-training------------------------
         else:
             # Regular supervised scenario
-            for _, batch_3d, batch_2d, batch_3d_input in train_generator.next_epoch():
+            for _, batch_3d, batch_2d, batch_3d_input, length in train_generator.next_epoch():
 
                 inputs_3d = torch.from_numpy(batch_3d.astype('float32'))
                 inputs_2d = torch.from_numpy(batch_2d.astype('float32'))
                 inputs_3d_input = torch.from_numpy(batch_3d_input.astype('float32'))
+                inputs_length = torch.from_numpy(length.astype('float32'))
                 if torch.cuda.is_available():
                     inputs_3d = inputs_3d.cuda()
                     inputs_2d = inputs_2d.cuda()
                     inputs_3d_input = inputs_3d_input.cuda()
+                    inputs_length = inputs_length.cuda()
 
                 optimizer.zero_grad()
 
                 # Predict 3D poses
-                predicted_3d_pos_rot = model_pos_train((inputs_2d, inputs_3d_input))
+                predicted_3d_pos_rot = model_pos_train((inputs_2d, inputs_3d_input, inputs_length))
                 predicted_3d_pos = predicted_3d_pos_rot[..., :3]
                 predicted_3d_rot = predicted_3d_pos_rot[..., 3:]
                 reference_pos = inputs_3d[..., :3]
@@ -513,19 +527,21 @@ if not args.evaluate:
 
             if not args.no_eval:
                 # Evaluate on test set
-                for cam, batch, batch_2d, batch_3d_input in test_generator.next_epoch():
+                for cam, batch, batch_2d, batch_3d_input, length in test_generator.next_epoch():
                     inputs_3d = torch.from_numpy(batch.astype('float32'))
                     inputs_2d = torch.from_numpy(batch_2d.astype('float32'))
                     inputs_3d_input = torch.from_numpy(batch_3d_input.astype('float32'))
+                    inputs_length = torch.from_numpy(length.astype('float32'))
                     if torch.cuda.is_available():
                         inputs_3d = inputs_3d.cuda()
                         inputs_2d = inputs_2d.cuda()
                         inputs_3d_input = inputs_3d_input.cuda()
+                        inputs_length = inputs_length.cuda()
 
                     inputs_traj = inputs_3d[:, :, :1].clone()
 
                     # Predict 3D poses
-                    predicted_3d_pos_rot = model_pos((inputs_2d, inputs_3d_input))
+                    predicted_3d_pos_rot = model_pos((inputs_2d, inputs_3d_input, inputs_length))
                     predicted_3d_pos = predicted_3d_pos_rot[..., :3]
                     predicted_3d_rot = predicted_3d_pos_rot[..., 3:]
                     reference_pos = inputs_3d[..., :3]
@@ -571,7 +587,7 @@ if not args.evaluate:
                 epoch_loss_traj_train_eval = 0
                 epoch_loss_2d_train_labeled_eval = 0
                 N = 0
-                for cam, batch, batch_2d, batch_3d_input in train_generator_eval.next_epoch():
+                for cam, batch, batch_2d, batch_3d_input, length in train_generator_eval.next_epoch():
                     if batch_2d.shape[1] == 0:
                         # This can only happen when downsampling the dataset
                         continue
@@ -579,14 +595,16 @@ if not args.evaluate:
                     inputs_3d = torch.from_numpy(batch.astype('float32'))
                     inputs_2d = torch.from_numpy(batch_2d.astype('float32'))
                     inputs_3d_input = torch.from_numpy(batch_3d_input.astype('float32'))
+                    inputs_length = torch.from_numpy(length.astype('float32'))
                     if torch.cuda.is_available():
                         inputs_3d = inputs_3d.cuda()
                         inputs_2d = inputs_2d.cuda()
                         inputs_3d_input = inputs_3d_input.cuda()
+                        inputs_length = inputs_length.cuda()
                     inputs_traj = inputs_3d[:, :, :1].clone()
 
                     # Compute 3D poses
-                    predicted_3d_pos_rot = model_pos((inputs_2d, inputs_3d_input))
+                    predicted_3d_pos_rot = model_pos((inputs_2d, inputs_3d_input, inputs_length))
                     predicted_3d_pos = predicted_3d_pos_rot[..., :3]
                     predicted_3d_rot = predicted_3d_pos_rot[..., 3:]
                     reference_pos = inputs_3d[..., :3]
@@ -932,7 +950,7 @@ else:
             for i in range(len(poses_2d)):  # Iterate across cameras
                 out_poses_2d.append(poses_2d[i])
 
-            poses_3d = dataset[subject][action]['pos_rot']
+            poses_3d = dataset[subject][action]['pos']
             assert len(poses_3d) == len(poses_2d), 'Camera count mismatch'
             for i in range(len(poses_3d)):  # Iterate across cameras
                 out_poses_3d.append(poses_3d[i])

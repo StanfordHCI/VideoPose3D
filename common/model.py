@@ -13,7 +13,7 @@ class TemporalModelBase(nn.Module):
     Do not instantiate this class.
     """
 
-    def __init__(self, num_joints_in, in_features, num_joints_in_extra, in_extra_features, num_joints_out,
+    def __init__(self, num_joints_in, in_features, num_joints_in_extra, in_extra_features, in_length, num_joints_out,
                  filter_widths, causal, dropout, channels):
         super().__init__()
 
@@ -25,6 +25,7 @@ class TemporalModelBase(nn.Module):
         self.in_features = in_features
         self.num_joints_in_extra = num_joints_in_extra
         self.in_extra_features = in_extra_features
+        self.in_length = in_length
         self.num_joints_out = num_joints_out
         self.filter_widths = filter_widths
 
@@ -63,7 +64,7 @@ class TemporalModelBase(nn.Module):
         return frames
 
     def forward(self, x_bundle):
-        x, x_extra = x_bundle
+        x, x_extra, x_length = x_bundle
 
         assert len(x.shape) == 4  # 1024[batch] x 243[history]
         assert x.shape[-2] == self.num_joints_in
@@ -73,10 +74,12 @@ class TemporalModelBase(nn.Module):
         assert x_extra.shape[-2] == self.num_joints_in_extra
         assert x_extra.shape[-1] == self.in_extra_features
 
+        assert x_length.shape[-1] == self.in_length
+
         sz = x.shape[:3]  # 1024[batch] x 243[history] x 21[joints]
         x = x.view(x.shape[0], x.shape[1], -1)  # 1024[batch] x 243[history] x n[data_len]
         x_extra = x_extra.view(x_extra.shape[0], x_extra.shape[1], -1)  # 1024[batch] x 243[history] x n[data_len]
-        x_combined = torch.cat((x, x_extra), dim=-1)
+        x_combined = torch.cat((x, x_extra, x_length), dim=-1)
         x = x_combined.permute(0, 2, 1)  # 1024 x n[data_len] x 243[history]
 
         x = self._forward_blocks(x)
@@ -96,7 +99,7 @@ class TemporalModel(TemporalModelBase):
     This implementation can be used for all use-cases.
     """
 
-    def __init__(self, num_joints_in, in_features, num_joints_in_extra, in_extra_features, num_joints_out,
+    def __init__(self, num_joints_in, in_features, num_joints_in_extra, in_extra_features, in_length, num_joints_out,
                  filter_widths, causal=False, dropout=0.25, channels=1024, dense=False):
         """
         Initialize this model.
@@ -113,9 +116,10 @@ class TemporalModel(TemporalModelBase):
         """
         super().__init__(num_joints_in, in_features,
                          num_joints_in_extra, in_extra_features,
+                         in_length,
                          num_joints_out, filter_widths, causal, dropout, channels)
 
-        in_total_features = num_joints_in * in_features + num_joints_in_extra * in_extra_features
+        in_total_features = num_joints_in * in_features + num_joints_in_extra * in_extra_features + in_length
 
         self.expand_conv = nn.Conv1d(in_total_features, channels, filter_widths[0], bias=False)
 
@@ -167,7 +171,7 @@ class TemporalModelOptimized1f(TemporalModelBase):
     with the reference implementation.
     """
 
-    def __init__(self, num_joints_in, in_features, num_joints_in_extra, in_extra_features, num_joints_out,
+    def __init__(self, num_joints_in, in_features, num_joints_in_extra, in_extra_features, in_length, num_joints_out,
                  filter_widths, causal=False, dropout=0.25, channels=1024):
         """
         Initialize this model.
@@ -183,9 +187,10 @@ class TemporalModelOptimized1f(TemporalModelBase):
         """
         super().__init__(num_joints_in, in_features,
                          num_joints_in_extra, in_extra_features,
+                         in_length,
                          num_joints_out, filter_widths, causal, dropout, channels)
 
-        in_total_features = num_joints_in * in_features + num_joints_in_extra * in_extra_features
+        in_total_features = num_joints_in * in_features + num_joints_in_extra * in_extra_features + in_length
 
         self.expand_conv = nn.Conv1d(in_total_features, channels, filter_widths[0], stride=filter_widths[0], bias=False)
 

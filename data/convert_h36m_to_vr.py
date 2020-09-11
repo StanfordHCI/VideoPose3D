@@ -22,12 +22,12 @@ def convert_h36m_cdf_to_pos_rot(cdf: cdflib.CDF) -> (np.ndarray, np.ndarray):
     head_center = project_to_line(face, neck, head_top)
     left_wrist = poses[:, 19]
     left_thumb = poses[:, 21]
-    left_hand_top = poses[:, 22]
-    left_hand_center = (left_wrist + left_hand_top) / 2
+    left_index = poses[:, 22]
+    left_hand_center = (left_wrist + left_index) / 2
     right_wrist = poses[:, 27]
     right_thumb = poses[:, 29]
-    right_hand_top = poses[:, 30]
-    right_hand_center = (right_wrist + right_hand_top) / 2
+    right_index = poses[:, 30]
+    right_hand_center = (right_wrist + right_index) / 2
     hip_center = poses[:, 11]
     shoulder_center = poses[:, 13]
     waist_real_center = (hip_center + shoulder_center) / 2
@@ -55,28 +55,38 @@ def convert_h36m_cdf_to_pos_rot(cdf: cdflib.CDF) -> (np.ndarray, np.ndarray):
         return np.mean(length)
 
     # Model v2.1 body metric
-    nose_neck = vec_len(head_center - shoulder_center)
-    shoulder_length = vec_len(shoulder_right)
     left_elbow = poses[:, 18]
+    right_elbow = poses[:, 26]
+    output_skeleton = np.stack(
+        (head_center, head_top, face, shoulder_center, hip_center,
+         left_shoulder, right_shoulder,
+         left_elbow, right_elbow,
+         left_wrist, right_wrist,
+         left_thumb, right_thumb,
+         left_index, right_index,
+         left_hip, right_hip,
+         left_knee, right_knee,
+         left_ankle, right_ankle,
+         left_toe, right_toe), axis=1
+    )
+
+    head_neck = vec_len(head_center - shoulder_center)
+    shoulder_length = vec_len(shoulder_right)
     left_shoulder_elbow = vec_len(left_shoulder - left_elbow)
     left_elbow_wrist = vec_len(left_elbow - left_wrist)
-    right_elbow = poses[:, 26]
     right_shoulder_elbow = vec_len(right_shoulder - right_elbow)
     right_elbow_wrist = vec_len(right_elbow - right_wrist)
     shoulder_hip = vec_len(shoulder_center - hip_center)
     hip_length = vec_len(hip_right)
     left_hip_knee = vec_len(left_hip - left_knee)
     left_knee_ankle = vec_len(left_knee - left_ankle)
-    left_ankle_foot = vec_len(left_ankle - left_foot_center)
     right_hip_knee = vec_len(right_hip - right_knee)
     right_knee_ankle = vec_len(right_knee - right_ankle)
-    right_ankle_foot = vec_len(right_ankle - right_foot_center)
-    output_lengths = [nose_neck, shoulder_length, shoulder_hip, hip_length,
-                      left_shoulder_elbow, right_shoulder_elbow,
-                      left_elbow_wrist, right_elbow_wrist,
-                      left_hip_knee, right_hip_knee,
-                      left_knee_ankle, right_knee_ankle,
-                      left_ankle_foot, right_ankle_foot]
+    output_lengths = np.asarray([head_neck, shoulder_length, shoulder_hip, hip_length,
+                                 left_shoulder_elbow, right_shoulder_elbow,
+                                 left_elbow_wrist, right_elbow_wrist,
+                                 left_hip_knee, right_hip_knee,
+                                 left_knee_ankle, right_knee_ankle])
 
     # %%
     def normalize(vec):
@@ -91,8 +101,8 @@ def convert_h36m_cdf_to_pos_rot(cdf: cdflib.CDF) -> (np.ndarray, np.ndarray):
         return quaternion.from_rotation_matrix(mat)
 
     head_quat = look_at_quaternion_tensor(head_top - head_center, face - head_center)
-    left_hand_quat = look_at_quaternion_tensor(left_thumb - left_wrist, left_hand_top - left_wrist)
-    right_hand_quat = look_at_quaternion_tensor(right_thumb - right_wrist, right_hand_top - right_wrist)
+    left_hand_quat = look_at_quaternion_tensor(left_thumb - left_wrist, left_index - left_wrist)
+    right_hand_quat = look_at_quaternion_tensor(right_thumb - right_wrist, right_index - right_wrist)
     waist_quat = look_at_quaternion_tensor(waist_up, waist_front)
     left_foot_quat = look_at_quaternion_tensor(left_knee - left_ankle, left_toe - left_ankle)
     right_foot_quat = look_at_quaternion_tensor(right_knee - right_ankle, right_toe - right_ankle)
@@ -117,7 +127,7 @@ def convert_h36m_cdf_to_pos_rot(cdf: cdflib.CDF) -> (np.ndarray, np.ndarray):
     outputs = np.concatenate((head_info, left_hand_info, right_hand_info, waist_info, left_foot_info, right_foot_info),
                              axis=1)
     # print(head_info.shape, outputs.shape)
-    return outputs, output_lengths
+    return outputs, output_skeleton / 1000, output_lengths / 1000
 
 
 def visual_test(pos_3d):

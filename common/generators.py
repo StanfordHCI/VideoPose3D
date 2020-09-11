@@ -4,13 +4,18 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 #
-
+import time
 from itertools import zip_longest
+
 import numpy as np
+import torch
 from torch.utils.data import DataLoader, Dataset
 
-from common.camera import random_x_y_shift, random_z_rot, apply_transform_combined
+from common.camera import random_z_rot, apply_transform_combined
 from common.skeleton import Skeleton
+from data.h36m_skeleton import H36mSkeleton
+from data.resnet_skeleton import ResnetSkeleton
+from data.skeleton_scale import SkeletonScale
 
 
 def extract_3d(poses_3d, input_joints, output_joints):
@@ -21,12 +26,17 @@ def extract_3d(poses_3d, input_joints, output_joints):
         poses_3d_output.append(poses_3d[i][:, output_joints, :])
     return poses_3d_output, poses_3d_input
 
-
+@profile
 def convert_to_vr(orig_data, t, q):
     orig_data_size = list(orig_data.shape[:-1]) + [1]
-    current_t = np.tile(t, orig_data_size)
-    current_q = np.tile(q, orig_data_size)
-    return apply_transform_combined(orig_data.astype('float32'), current_q, current_t)
+    if type(orig_data) is torch.Tensor:
+        current_t = t.repeat(orig_data_size)
+        current_q = q.repeat(orig_data_size)
+        return apply_transform_combined(orig_data, current_q, current_t)
+    else:
+        current_t = np.tile(t, orig_data_size)
+        current_q = np.tile(q, orig_data_size)
+        return apply_transform_combined(orig_data.astype('float32'), current_q, current_t)
 
 
 def element_index_batch(item, in_list):
@@ -53,7 +63,7 @@ class ChunkedGeneratorDataset(Dataset):
     joints_left and joints_right -- list of left/right 3D joints if flipping is enabled
     """
 
-    def __init__(self, batch_size, cameras, poses_3d, poses_2d,
+    def __init__(self, batch_size, cameras, poses_3d, poses_2d, lengths,
                  chunk_length, pad=0, causal_shift=0,
                  shuffle=True, random_seed=1234,
                  augment=False, kps_left=None, kps_right=None, joints_left=None, joints_right=None,
@@ -62,8 +72,6 @@ class ChunkedGeneratorDataset(Dataset):
         assert cameras is None or len(cameras) == len(poses_2d)
         # Build lineage info
         pairs = []  # (seq_idx, start_frame, end_frame, flip) tuples
-        if poses_3d is not None:
-            poses_3d, poses_3d_input = extract_3d(poses_3d, skeleton.input_joints(), skeleton.output_joints())
         for i in range(len(poses_2d)):
             assert poses_3d is None or poses_3d[i].shape[0] == poses_3d[i].shape[0]
             n_chunks = (poses_2d[i].shape[0] + chunk_length - 1) // chunk_length
@@ -85,9 +93,15 @@ class ChunkedGeneratorDataset(Dataset):
         self.state = None
 
         self.cameras = cameras
-        self.poses_3d = poses_3d
-        self.poses_2d = poses_2d
-        self.poses_3d_input = [] if poses_3d is None else poses_3d_input
+
+        self.orig_poses_3d = poses_3d
+        self.orig_poses_2d = poses_2d
+        self.lengths = lengths
+        self.transforms = None
+        self.scales = None
+        self.poses_3d = None
+        self.poses_3d_input = None
+        self.poses_2d = None
 
         self.augment = augment
         self.kps_left = kps_left
@@ -108,6 +122,37 @@ class ChunkedGeneratorDataset(Dataset):
             self.joints_right = None
             self.joints_left_input = None
             self.joints_right_input = None
+
+    def rescale(self):
+        with torch.no_grad():
+            t0 = time.time()
+            poses_3d_skeleton = [H36mSkeleton(torch.from_numpy(self.orig_poses_3d[i]).float())
+                                 for i in range(len(self.orig_poses_3d))] if self.orig_poses_3d is not None else None
+            poses_2d_skeleton = [ResnetSkeleton(torch.from_numpy(self.orig_poses_2d[i]).float())
+                                 for i in range(len(self.orig_poses_3d))]
+            scales = []
+            poses_3d = []
+            poses_2d = []
+            for i in range(len(poses_3d_skeleton)):
+                skeleton_scale = SkeletonScale.random_scale()
+                scales += [skeleton_scale.cpu().numpy()]
+                # if torch.cuda.is_available():
+                #     skeleton_scale = skeleton_scale.cuda()
+                poses_2d_skeleton[i].scale(skeleton_scale)
+                poses_3d_skeleton[i].scale(skeleton_scale)
+                batch_3d = poses_3d_skeleton[i].get_vr_joints()
+                poses_2d += [poses_2d_skeleton[i].get_resnet_joints().cpu().numpy()]
+                transform_t = np.zeros((1, 3))  # generate a random transform
+                transform_q = random_z_rot([])
+                transform_t = torch.from_numpy(transform_t).float()
+                transform_q = torch.from_numpy(transform_q).float()
+                batch_3d = convert_to_vr(batch_3d, transform_t, transform_q).cpu().numpy()
+                poses_3d += [batch_3d]
+            self.poses_3d, self.poses_3d_input = extract_3d(poses_3d, self.input_joints, self.output_joints)
+            self.poses_2d = poses_2d
+            self.scales = scales
+            print(f"rescale cost: {time.time() - t0}")
+        torch.cuda.empty_cache()
 
     def num_frames(self):
         return self.num_batches * self.batch_size
@@ -134,7 +179,8 @@ class ChunkedGeneratorDataset(Dataset):
     def __len__(self):
         return len(self.pairs)
 
-    def __getitem__(self, item) -> (np.array, np.array, np.array, np.array):
+    @profile
+    def __getitem__(self, item) -> (torch.Tensor, torch.Tensor, np.array, np.array):
         """
         Get next training data
         Returns:
@@ -144,8 +190,6 @@ class ChunkedGeneratorDataset(Dataset):
             batch_3d_extra: as input
        """
         seq_i, start_3d, end_3d, flip = self.pairs[item]
-        transform_t = np.zeros((1, 3))  # generate a random transform
-        transform_q = random_z_rot([])
         start_2d = start_3d - self.pad - self.causal_shift
         end_2d = end_3d + self.pad - self.causal_shift
 
@@ -165,8 +209,6 @@ class ChunkedGeneratorDataset(Dataset):
         else:
             batch_2d = seq_2d[low_2d:high_2d]
             batch_3d_input = seq_3d_input[low_2d:high_2d]
-
-        batch_3d_input = convert_to_vr(batch_3d_input, transform_t, transform_q)
 
         if flip:
             # Flip 2D keypoints
@@ -189,13 +231,21 @@ class ChunkedGeneratorDataset(Dataset):
             else:
                 batch_3d = seq_3d[low_3d:high_3d]
 
-            batch_3d = convert_to_vr(batch_3d, transform_t, transform_q)
 
             if flip:
                 # Flip 3D joints
                 batch_3d[:, :, [0, 3, 4]] *= -1
                 batch_3d[:, self.joints_left + self.joints_right] = \
                     batch_3d[:, self.joints_right + self.joints_left]
+
+        length = self.lengths[seq_i]
+        scale = self.scales[seq_i]
+        scaled_length = scale * length
+        tiled_length = np.tile(scaled_length, reps=(batch_2d.shape[0], 1))
+
+        if flip:
+            tiled_length[:, SkeletonScale.left_scales + SkeletonScale.right_scales] = \
+                tiled_length[:, SkeletonScale.right_scales + SkeletonScale.left_scales]
 
         # Cameras
         if self.cameras is not None:
@@ -205,47 +255,48 @@ class ChunkedGeneratorDataset(Dataset):
                 batch_cam[2] *= -1
                 batch_cam[7] *= -1
 
-        if self.poses_3d is None and self.cameras is None:
-            return None, None, batch_2d, None
-        elif self.poses_3d is not None and self.cameras is None:
-            return None, batch_3d, batch_2d, batch_3d_input
-        elif self.poses_3d is None:
-            return batch_cam, None, batch_2d, None
-        else:
-            return batch_cam, batch_3d, batch_2d, batch_3d_input
+        return None, batch_3d, batch_2d, batch_3d_input, tiled_length
 
 
 class ChunkedGenerator(DataLoader):
     dataset: ChunkedGeneratorDataset
 
-    def __init__(self, batch_size, cameras, poses_3d, poses_2d,
+    def __init__(self, batch_size, cameras, poses_3d, poses_2d, lengths,
                  chunk_length, pad=0, causal_shift=0,
                  shuffle=True, random_seed=1234,
                  augment=False, kps_left=None, kps_right=None, joints_left=None, joints_right=None,
                  endless=False, skeleton: Skeleton = None):
-        self.dataset = ChunkedGeneratorDataset(batch_size, cameras, poses_3d, poses_2d,
+        self.dataset = ChunkedGeneratorDataset(batch_size, cameras, poses_3d, poses_2d, lengths,
                                                chunk_length, pad, causal_shift,
                                                shuffle, random_seed,
                                                augment, kps_left, kps_right, joints_left, joints_right,
                                                endless, skeleton)
         super(ChunkedGenerator, self).__init__(self.dataset, batch_size=batch_size, shuffle=shuffle, num_workers=8,
                                                collate_fn=self.combine)
+        self.last_time = time.time()
 
     @staticmethod
-    def combine(inputs: [(np.array, np.array, np.array, np.array)]) -> (np.array, np.array, np.array, np.array):
+    def combine(inputs: [(np.array, np.array, np.array, np.array, np.array)]) -> (np.array, np.array, np.array, np.array, np.array):
         if len(inputs) == 0:
             return None, None, None, None
         else:
             example = inputs[0]
             result = []
-            for i in range(4):
+            for i in range(5):
                 if example[i] is None:
                     result += [None]
-                result += [np.stack([input_array[i] for input_array in inputs], axis=0)]
+                elif type(example[i]) is torch.Tensor:
+                    result += [torch.stack([input_array[i] for input_array in inputs], dim=0)]
+                else:
+                    result += [np.stack([input_array[i] for input_array in inputs], axis=0)]
         return result
 
     def next_epoch(self):
-        for item in self.__iter__():
+        self.dataset.rescale()
+        for i, item in enumerate(self.__iter__()):
+            this_time = time.time()
+            print(f"data gen cost: {this_time - self.last_time}")
+            self.last_time = this_time
             yield item
 
 
@@ -268,14 +319,12 @@ class UnchunkedGenerator:
     joints_left and joints_right -- list of left/right 3D joints if flipping is enabled
     """
 
-    def __init__(self, cameras, poses_3d, poses_2d, pad=0, causal_shift=0,
+    def __init__(self, cameras, poses_3d, poses_2d, lengths, pad=0, causal_shift=0,
                  augment=False, kps_left=None, kps_right=None, joints_left=None, joints_right=None,
                  skeleton: Skeleton = None):
         # TODO: parse skeleton
         assert poses_3d is None or len(poses_3d) == len(poses_2d)
         assert cameras is None or len(cameras) == len(poses_2d)
-        if poses_3d is not None:
-            poses_3d, poses_3d_input = extract_3d(poses_3d, skeleton.input_joints(), skeleton.output_joints())
         self.augment = augment
         self.kps_left = kps_left
         self.kps_right = kps_right
@@ -296,17 +345,25 @@ class UnchunkedGenerator:
             self.joints_left_input = None
             self.joints_right_input = None
 
+        self.lengths = lengths
         self.pad = pad
         self.causal_shift = causal_shift
         self.cameras = [] if cameras is None else cameras
-        self.poses_3d = [] if poses_3d is None else poses_3d
-        self.poses_2d = poses_2d
-        self.poses_3d_input = [] if poses_3d is None else poses_3d_input
+        if torch.cuda.is_available():
+            self.poses_3d_skeleton = [H36mSkeleton(torch.from_numpy(poses_3d[i]).float().cuda())
+                                      for i in range(len(poses_3d))] if poses_3d is not None else None
+            self.poses_2d_skeleton = [ResnetSkeleton(torch.from_numpy(poses_2d[i]).float().cuda())
+                                      for i in range(len(poses_3d))]
+        else:
+            self.poses_3d_skeleton = [H36mSkeleton(torch.from_numpy(poses_3d[i]).float())
+                                      for i in range(len(poses_3d))] if poses_3d is not None else None
+            self.poses_2d_skeleton = [ResnetSkeleton(torch.from_numpy(poses_2d[i]).float())
+                                      for i in range(len(poses_3d))]
 
     def num_frames(self):
         count = 0
-        for p in self.poses_2d:
-            count += p.shape[0]
+        for p in self.poses_2d_skeleton:
+            count += p.absolute_pos.shape[0]
         return count
 
     def augment_enabled(self):
@@ -324,8 +381,19 @@ class UnchunkedGenerator:
             batch_2d: as input
             batch_3d_extra: as input
        """
-        for seq_cam, seq_3d, seq_2d, seq_3d_input in zip_longest(self.cameras, self.poses_3d, self.poses_2d,
-                                                                 self.poses_3d_input):
+        for seq_cam, seq_3d_gen, seq_2d_gen, length in \
+                zip_longest(self.cameras, self.poses_3d_skeleton, self.poses_2d_skeleton, self.lengths):
+            seq_3d_gen: H36mSkeleton
+            seq_2d_gen: ResnetSkeleton
+            skeleton_scale = SkeletonScale.random_scale()
+            if torch.cuda.is_available():
+                skeleton_scale.cuda()
+            seq_3d_gen.scale(skeleton_scale)
+            seq_3d_all = seq_3d_gen.get_vr_joints().cpu().numpy()
+            seq_3d = seq_3d_all[:, self.output_joints]
+            seq_3d_input = seq_3d_all[:, self.input_joints]
+            seq_2d_gen.scale(skeleton_scale)
+            seq_2d = seq_2d_gen.get_resnet_joints().cpu().numpy()
             # TODO: apply random transformation
             batch_cam = None if seq_cam is None else np.expand_dims(seq_cam, axis=0)
             batch_3d = None if seq_3d is None else np.expand_dims(seq_3d, axis=0)
@@ -339,14 +407,20 @@ class UnchunkedGenerator:
                                                                                       (0, 0),
                                                                                       (0, 0)),
                                                                                      'edge'), axis=0)
-            # generate random transform
-            transform_t = np.zeros((1, 3))
+            transform_t = np.zeros((1, 3))  # generate a random transform
             transform_q = random_z_rot([])
 
             # apply random transform
             batch_3d = convert_to_vr(batch_3d, transform_t, transform_q)
             batch_3d_input = convert_to_vr(batch_3d_input, transform_t, transform_q)
 
+            scale = skeleton_scale.cpu().numpy()
+            scaled_length = scale * length
+            tiled_length = np.tile(scaled_length, reps=(batch_2d.shape[0], batch_2d.shape[1], 1))
+
+            batch_3d = batch_3d
+            batch_2d = batch_2d
+            batch_3d_input = batch_3d_input
             if self.augment:
                 # Append flipped version
                 if batch_cam is not None:
@@ -369,4 +443,8 @@ class UnchunkedGenerator:
                 batch_2d[1, :, :, 0] *= -1
                 batch_2d[1, :, self.kps_left + self.kps_right] = batch_2d[1, :, self.kps_right + self.kps_left]
 
-            yield batch_cam, batch_3d, batch_2d, batch_3d_input
+                tiled_length = np.concatenate((tiled_length, tiled_length), axis=0)
+                tiled_length[1, :, SkeletonScale.left_scales + SkeletonScale.right_scales] = \
+                    tiled_length[1, :, SkeletonScale.right_scales + SkeletonScale.left_scales]
+
+            yield batch_cam, batch_3d, batch_2d, batch_3d_input, tiled_length
