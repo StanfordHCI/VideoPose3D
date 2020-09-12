@@ -39,7 +39,7 @@ def camera_to_world(X, R, t):
     return wrap(qrot, np.tile(R, (*X.shape[:-1], 1)), X) + t
 
 
-def camera_to_world(q, R):
+def camera_to_world_quat(q, R):
     return wrap(q_multiply, q, np.tile(R, (*q.shape[:-1], 1)))
 
 

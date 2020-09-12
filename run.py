@@ -189,7 +189,7 @@ if action_filter is not None:
 
 # -----------------------------load the deep learning modelf------------------------------------
 cameras_valid, poses_valid, poses_valid_2d = fetch(subjects_test, action_filter)
-raise KeyboardInterrupt
+#raise KeyboardInterrupt
 filter_widths = [int(x) for x in args.architecture.split(',')]
 if not args.disable_optimizations and not args.dense and args.stride == 1:
     # Use optimized model for single-frame predictions
@@ -353,7 +353,6 @@ if not args.evaluate:
     iter = 0
     # Pos model only
     while epoch < args.epochs:
-        if iter >= 1: break
         start_time = time()
         epoch_loss_3d_train = 0
         epoch_loss_rot_train = 0
@@ -513,7 +512,7 @@ if not args.evaluate:
                     inputs_3d[:, :, 0, 0:3] = 0
 
                     # Predict 3D poses
-                    predicted_3d_pos_rot = model_pos_train(inputs_2d)
+                    predicted_3d_pos_rot = model_pos(inputs_2d)
                     predicted_3d_pos = predicted_3d_pos_rot[..., :3]
                     predicted_3d_rot = predicted_3d_pos_rot[..., 3:]
                     reference_pos = inputs_3d[..., :3]
