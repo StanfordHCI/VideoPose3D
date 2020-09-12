@@ -16,7 +16,7 @@ import torch.optim as optim
 import os
 import sys
 import errno
-
+import datetime
 from common.camera import *
 from common.model import *
 from common.loss import *
@@ -75,7 +75,7 @@ for subject in dataset.subjects():
                 positions_3d.append(pos_rot)
             anim['pos_rot'] = positions_3d
 
-writer = SummaryWriter(log_dir="./logs")
+writer = SummaryWriter(log_dir="./logs/"+datetime.datetime.now().strftime("%Y%m%dT%H%M%S"))
 # -----------------------------prepare the 2D dataset as input ------------------------------------
 print('Loading 2D detections...')
 keypoints = np.load('data/data_2d_' + args.dataset + '_' + args.keypoints + '.npz', allow_pickle=True)
@@ -574,7 +574,7 @@ if not args.evaluate:
                     inputs_3d[:, :, 0, 0:3] = 0
 
                     # Compute 3D poses
-                    predicted_3d_pos_rot = model_pos_train(inputs_2d)
+                    predicted_3d_pos_rot = model_pos(inputs_2d)
                     predicted_3d_pos = predicted_3d_pos_rot[..., :3]
                     predicted_3d_rot = predicted_3d_pos_rot[..., 3:]
                     reference_pos = inputs_3d[..., :3]
