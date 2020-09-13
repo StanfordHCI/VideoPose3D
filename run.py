@@ -81,7 +81,7 @@ for subject in dataset.subjects():
                 pos_rot[:, :, :2] -= pos_rot[:, :1, :2]  # Remove global offset
                 positions_3d.append(pos_rot)
             anim['pos_rot'] = positions_3d
-        anim['lengths'] = lengths
+        # anim['lengths'] = lengths
 
 writer = SummaryWriter(log_dir="./logs/"+datetime.datetime.now().strftime("%Y%m%dT%H%M%S"))
 # -----------------------------prepare the 2D dataset as input ------------------------------------
@@ -96,8 +96,9 @@ keypoints = keypoints['positions_2d'].item()
 for subject in dataset.subjects():
     assert subject in keypoints, 'Subject {} is missing from the 2D detections dataset'.format(subject)
     for action in dataset[subject].keys():
-        assert action in keypoints[subject], 'Action {} of subject {} is missing from the 2D detections dataset'.format(
-            action, subject)
+        if action == "lengths":
+            continue
+        assert action in keypoints[subject], 'Action {} of subject {} is missing from the 2D detections dataset'.format(action, subject)
         if 'pos_rot' not in dataset[subject][action]:
             continue
 
@@ -488,6 +489,7 @@ if not args.evaluate:
                 loss_total.backward()
 
                 optimizer.step()
+
 
         loss_3d_train = epoch_loss_3d_train / N
         loss_rot_train = epoch_loss_rot_train / N
