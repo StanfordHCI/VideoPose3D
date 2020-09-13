@@ -32,6 +32,23 @@ def convert_to_vr(orig_data, t, q):
 def element_index_batch(item, in_list):
     return [in_list.index(i) for i in item]
 
+def normalize_maxmin(pose_2d):
+    assert len(pose_2d.shape) == 3
+    #print(pose_2d.shape)
+    #print(pose_2d[0,:,:])
+    min_x = np.min(pose_2d[:, :, 0])
+    #print(pose_2d[:, :, 0], min_x)
+    max_x = np.max(pose_2d[:, :, 0])
+    min_y = np.min(pose_2d[:, :, 1])
+    max_y = np.max(pose_2d[:, :, 1])
+    diff_x = max_x - min_x
+    diff_y = max_y - min_y
+    max_range = max(diff_x, diff_y)
+    pose_2d[:, :, [0, 1]] = (pose_2d[:, :, [0, 1]] - [min_x, min_y]) / max_range
+    #print(pose_2d[0,:,:])
+    #raise KeyboardInterrupt
+    return pose_2d
+
 
 class ChunkedGeneratorDataset(Dataset):
     """
@@ -62,6 +79,8 @@ class ChunkedGeneratorDataset(Dataset):
         assert cameras is None or len(cameras) == len(poses_2d)
         # Build lineage info
         pairs = []  # (seq_idx, start_frame, end_frame, flip) tuples
+                   
+        #print(poses_3d[0].shape)
         if poses_3d is not None:
             poses_3d, poses_3d_input = extract_3d(poses_3d, skeleton.input_joints(), skeleton.output_joints())
         for i in range(len(poses_2d)):
@@ -196,7 +215,9 @@ class ChunkedGeneratorDataset(Dataset):
                 batch_3d[:, :, [0, 3, 4]] *= -1
                 batch_3d[:, self.joints_left + self.joints_right] = \
                     batch_3d[:, self.joints_right + self.joints_left]
-
+        #print(batch_2d.shape)
+        batch_2d = normalize_maxmin(batch_2d)
+        #raise KeyboardInterrupt
         # Cameras
         if self.cameras is not None:
             batch_cam = self.cameras[seq_i]
@@ -274,6 +295,8 @@ class UnchunkedGenerator:
         # TODO: parse skeleton
         assert poses_3d is None or len(poses_3d) == len(poses_2d)
         assert cameras is None or len(cameras) == len(poses_2d)
+        
+        
         if poses_3d is not None:
             poses_3d, poses_3d_input = extract_3d(poses_3d, skeleton.input_joints(), skeleton.output_joints())
         self.augment = augment
@@ -368,5 +391,6 @@ class UnchunkedGenerator:
                 batch_2d = np.concatenate((batch_2d, batch_2d), axis=0)
                 batch_2d[1, :, :, 0] *= -1
                 batch_2d[1, :, self.kps_left + self.kps_right] = batch_2d[1, :, self.kps_right + self.kps_left]
-
+            #print(batch_2d.shape)
+            #batch_2d = normalize_maxmin(batch_2d)
             yield batch_cam, batch_3d, batch_2d, batch_3d_input

@@ -216,11 +216,18 @@ else:
                                     channels=args.channels,
                                     dense=args.dense)
 
-model_pos = TemporalModel(poses_valid_2d[0].shape[-2], poses_valid_2d[0].shape[-1],
+model_pos = TemporalModelOptimized1f(poses_valid_2d[0].shape[-2], poses_valid_2d[0].shape[-1],
+                                               len(dataset.skeleton().input_joints()), 7,
+                                               len(dataset.skeleton().output_joints()),
+                                               filter_widths=filter_widths, causal=args.causal, dropout=args.dropout,
+                                               channels=args.channels)
+'''
+TemporalModel(poses_valid_2d[0].shape[-2], poses_valid_2d[0].shape[-1],
                           len(dataset.skeleton().input_joints()), 7,
                           len(dataset.skeleton().output_joints()),
                           filter_widths=filter_widths, causal=args.causal, dropout=args.dropout, channels=args.channels,
                           dense=args.dense)
+'''
 
 receptive_field = model_pos.receptive_field()
 print('INFO: Receptive field: {} frames'.format(receptive_field))
@@ -263,11 +270,17 @@ if args.resume or args.evaluate:
         model_traj = None
 
 # TODO: make sure symmetry is correct
-test_generator = UnchunkedGenerator(cameras_valid, poses_valid, poses_valid_2d,
-                                    pad=pad, causal_shift=causal_shift, augment=False,
-                                    kps_left=kps_left, kps_right=kps_right, joints_left=joints_left,
-                                    joints_right=joints_right, skeleton=dataset.skeleton())
-print('INFO: Testing on {} frames'.format(test_generator.num_frames()))
+test_generator = ChunkedGenerator(args.batch_size // args.stride, cameras_valid, poses_valid, poses_valid_2d,
+                                       args.stride,
+                                       pad=pad, causal_shift=causal_shift, shuffle=False, augment=args.data_augmentation,
+                                       kps_left=kps_left, kps_right=kps_right, joints_left=joints_left,
+                                       joints_right=joints_right, skeleton=dataset.skeleton())
+                                       
+# UnchunkedGenerator(cameras_valid, poses_valid, poses_valid_2d,
+#                                    pad=pad, causal_shift=causal_shift, augment=False,
+#                                    kps_left=kps_left, kps_right=kps_right, joints_left=joints_left,
+#                                    joints_right=joints_right, skeleton=dataset.skeleton())
+#print('INFO: Testing on {} frames'.format(test_generator.num_frames()))
 
 # -----------------------------Begin training------------------------------------
 
@@ -331,9 +344,14 @@ if not args.evaluate:
                                        pad=pad, causal_shift=causal_shift, shuffle=True, augment=args.data_augmentation,
                                        kps_left=kps_left, kps_right=kps_right, joints_left=joints_left,
                                        joints_right=joints_right, skeleton=dataset.skeleton())
-    train_generator_eval = UnchunkedGenerator(cameras_train, poses_train, poses_train_2d,
-                                              pad=pad, causal_shift=causal_shift, augment=False, skeleton=dataset.skeleton())
-    print('INFO: Training on {} frames'.format(train_generator_eval.num_frames()))
+    train_generator_eval = ChunkedGenerator(args.batch_size // args.stride, cameras_train, poses_train, poses_train_2d,
+                                       args.stride,
+                                       pad=pad, causal_shift=causal_shift, shuffle=True, augment=args.data_augmentation,
+                                       kps_left=kps_left, kps_right=kps_right, joints_left=joints_left,
+                                       joints_right=joints_right, skeleton=dataset.skeleton())
+    # UnchunkedGenerator(cameras_train, poses_train, poses_train_2d,
+    #                                         pad=pad, causal_shift=causal_shift, augment=False, skeleton=dataset.skeleton())
+    #print('INFO: Training on {} frames'.format(train_generator_eval.num_frames()))
     if semi_supervised:
         semi_generator = ChunkedGenerator(args.batch_size // args.stride, cameras_semi, None, poses_semi_2d,
                                           args.stride,
@@ -512,7 +530,7 @@ if not args.evaluate:
             epoch_loss_traj_valid = 0
             epoch_loss_2d_valid = 0
             N = 0
-
+            print("finish training")
             if not args.no_eval:
                 # Evaluate on test set
                 for cam, batch, batch_2d, batch_3d_input in test_generator.next_epoch():
@@ -527,7 +545,7 @@ if not args.evaluate:
                     inputs_traj = inputs_3d[:, :, :1].clone()
 
                     # Predict 3D poses
-                    predicted_3d_pos_rot = model_pos((inputs_2d, inputs_3d_input))
+                    predicted_3d_pos_rot = model_pos_train((inputs_2d, inputs_3d_input))
                     predicted_3d_pos = predicted_3d_pos_rot[..., :3]
                     predicted_3d_rot = predicted_3d_pos_rot[..., 3:]
                     reference_pos = inputs_3d[..., :3]
@@ -588,7 +606,7 @@ if not args.evaluate:
                     inputs_traj = inputs_3d[:, :, :1].clone()
 
                     # Compute 3D poses
-                    predicted_3d_pos_rot = model_pos((inputs_2d, inputs_3d_input))
+                    predicted_3d_pos_rot = model_pos_train((inputs_2d, inputs_3d_input))
                     predicted_3d_pos = predicted_3d_pos_rot[..., :3]
                     predicted_3d_rot = predicted_3d_pos_rot[..., 3:]
                     reference_pos = inputs_3d[..., :3]
@@ -656,7 +674,9 @@ if not args.evaluate:
                     losses_2d_train_unlabeled_eval.append(epoch_loss_2d_train_unlabeled_eval / N_semi)
 
         elapsed = (time() - start_time) / 60
-
+          
+        print("finish testing")
+        
         if args.no_eval:
             print('[%d] time %.2f lr %f 3d_train %f' % (
                 epoch + 1,
