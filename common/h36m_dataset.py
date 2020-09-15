@@ -15,7 +15,10 @@ from data.convert_h36m_to_vr import cal_pos_rot
 h36m_skeleton = Skeleton(parents=[-1, 0, 1, 2, 3, 4, 0, 6, 7, 8, 9, 0, 11, 12, 13, 14, 12,
                                   16, 17, 18, 19, 20, 19, 22, 12, 24, 25, 26, 27, 28, 27, 30],
                          joints_left=[6, 7, 8, 9, 10, 16, 17, 18, 19, 20, 21, 22, 23],
-                         joints_right=[1, 2, 3, 4, 5, 24, 25, 26, 27, 28, 29, 30, 31])
+                         joints_right=[1, 2, 3, 4, 5, 24, 25, 26, 27, 28, 29, 30, 31],
+                         input_joints = [0, 1, 2],
+                         output_joints = [i for i in range(0,17)],
+)
 
 h36m_cameras_intrinsic_params = [
     {
@@ -209,7 +212,7 @@ h36m_cameras_extrinsic_params = {
 
 
 class Human36mDataset(MocapDataset):
-    def __init__(self, path, remove_static_joints=True):
+    def __init__(self, path, path2, remove_static_joints=True):
         super().__init__(fps=50, skeleton=h36m_skeleton)
 
         self._cameras = copy.deepcopy(h36m_cameras_extrinsic_params)
@@ -235,15 +238,18 @@ class Human36mDataset(MocapDataset):
 
         # Load serialized dataset
         data = np.load(path, allow_pickle=True)['positions_3d'].item()
+        data2 = np.load(path2, allow_pickle=True)['pos_rot'].item()
 
         self._data = {}
         for subject, actions in data.items():
             self._data[subject] = {}
             for action_name, positions in actions.items():
-                pos_rot = cal_pos_rot(positions)
+                pos_rot = data2[subject][action_name]
+                assert pos_rot.shape[0] == positions.shape[0]
+                #print(subject, action_name)
                 self._data[subject][action_name] = {
                     'positions': positions,
-                    'pos_rot': pos_rot,
+                    'pos_rot': pos_rot[:, :3, :],
                     'cameras': self._cameras[subject],
                 }
 

@@ -85,11 +85,17 @@ def apply_transform_combined(xq, r, t) -> np.array:
     Returns:
         object: array of processed position and rotations
     """
-    old_x = xq[..., :3]
-    old_q = xq[..., 3:]
-    new_x = apply_transform(old_x, r, t)
-    new_q = apply_transform_rot(old_q, r)
-    return np.concatenate((new_x, new_q), axis=-1)
+    if xq.shape[-1] == 7:
+        old_x = xq[..., :3]
+        old_q = xq[..., 3:]
+        new_x = apply_transform(old_x, r, t)
+        new_q = apply_transform_rot(old_q, r)
+        return np.concatenate((new_x, new_q), axis=-1)
+    elif xq.shape[-1] == 3:
+        new_x = apply_transform(xq, r, t)
+        return new_x
+    else:
+        raise KeyboardInterrupt
 
 
 def project_to_2d(X, camera_params):

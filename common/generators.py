@@ -77,21 +77,17 @@ class ChunkedGeneratorDataset(Dataset):
     joints_left and joints_right -- list of left/right 3D joints if flipping is enabled
     """
 
-    def __init__(self, batch_size, cameras, poses_3d0, poses_2d,
+    def __init__(self, batch_size, cameras, poses_3d, poses_2d, poses_3d_input,
                  chunk_length, pad=0, causal_shift=0,
                  shuffle=True, random_seed=1234,
                  augment=False, kps_left=None, kps_right=None, joints_left=None, joints_right=None,
                  endless=False, skeleton: Skeleton = None):
-        assert poses_3d0 is None or len(poses_3d0) == len(poses_2d), (len(poses_3d0), len(poses_2d))
+        assert poses_3d is None or len(poses_3d) == len(poses_2d), (len(poses_3d), len(poses_2d))
         assert cameras is None or len(cameras) == len(poses_2d)
         # Build lineage info
 
-        for i in range(len(poses_2d)):
-            poses_2d[i] = normalize_maxmin(poses_2d[i]) 
 
         pairs = []  # (seq_idx, start_frame, end_frame, flip) tuples
-        if poses_3d0 is not None:
-            poses_3d, poses_3d_input = poses_3d0
         for i in range(len(poses_2d)):
             assert poses_3d is None or poses_3d[i].shape[0] == poses_3d[i].shape[0]
             n_chunks = (poses_2d[i].shape[0] + chunk_length - 1) // chunk_length
@@ -246,12 +242,12 @@ class ChunkedGeneratorDataset(Dataset):
 class ChunkedGenerator(DataLoader):
     dataset: ChunkedGeneratorDataset
 
-    def __init__(self, batch_size, cameras, poses_3d, poses_2d,
+    def __init__(self, batch_size, cameras, poses_3d, poses_2d, poses_3d_input,
                  chunk_length, pad=0, causal_shift=0,
                  shuffle=True, random_seed=1234,
                  augment=False, kps_left=None, kps_right=None, joints_left=None, joints_right=None,
                  endless=False, skeleton: Skeleton = None):
-        self.dataset = ChunkedGeneratorDataset(batch_size, cameras, poses_3d, poses_2d,
+        self.dataset = ChunkedGeneratorDataset(batch_size, cameras, poses_3d, poses_2d, poses_3d_input,
                                                chunk_length, pad, causal_shift,
                                                shuffle, random_seed,
                                                augment, kps_left, kps_right, joints_left, joints_right,
@@ -296,18 +292,13 @@ class UnchunkedGenerator:
     joints_left and joints_right -- list of left/right 3D joints if flipping is enabled
     """
 
-    def __init__(self, cameras, poses_3d0, poses_2d, pad=0, causal_shift=0,
+    def __init__(self, cameras, poses_3d, poses_2d, poses_3d_input, pad=0, causal_shift=0,
                  augment=False, kps_left=None, kps_right=None, joints_left=None, joints_right=None,
                  skeleton: Skeleton = None):
         # TODO: parse skeleton
-        assert poses_3d0 is None or len(poses_3d0) == len(poses_2d)
+        assert poses_3d is None or len(poses_3d) == len(poses_2d)
         assert cameras is None or len(cameras) == len(poses_2d)
 
-        for i in range(len(poses_2d)):
-            poses_2d[i] = normalize_maxmin(poses_2d[i]) 
-
-        if poses_3d0 is not None:
-            poses_3d, poses_3d_input = poses_3d0
         self.augment = augment
         self.kps_left = kps_left
         self.kps_right = kps_right
