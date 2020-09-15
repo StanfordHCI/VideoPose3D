@@ -24,7 +24,7 @@ class TemporalModelBase(nn.Module):
         self.num_joints_in = num_joints_in
         self.in_features = in_features
         self.num_joints_in_extra = num_joints_in_extra
-        self.in_extra_features = in_extra_features
+        self.in_extra_features = in_extra_features - 4
         self.num_joints_out = num_joints_out
         self.filter_widths = filter_widths
 
@@ -71,11 +71,11 @@ class TemporalModelBase(nn.Module):
 
         assert len(x_extra.shape) == 4  # 1024[batch] x 243[history] x 3[joints] x 7[pos, rot]
         assert x_extra.shape[-2] == self.num_joints_in_extra
-        assert x_extra.shape[-1] == self.in_extra_features
+        assert x_extra.shape[-1] == self.in_extra_features + 4
 
         sz = x.shape[:3]  # 1024[batch] x 243[history] x 21[joints]
         x = x.view(x.shape[0], x.shape[1], -1)  # 1024[batch] x 243[history] x n[data_len]
-        x_extra = x_extra.view(x_extra.shape[0], x_extra.shape[1], -1)  # 1024[batch] x 243[history] x n[data_len]
+        x_extra = x_extra[:, :, :, :3].reshape(x_extra.shape[0], x_extra.shape[1], -1)  # 1024[batch] x 243[history] x n[data_len]
         x_combined = torch.cat((x, x_extra), dim=-1)
         x = x_combined.permute(0, 2, 1)  # 1024 x n[data_len] x 243[history]
 
@@ -115,7 +115,7 @@ class TemporalModel(TemporalModelBase):
                          num_joints_in_extra, in_extra_features,
                          num_joints_out, filter_widths, causal, dropout, channels)
 
-        in_total_features = num_joints_in * in_features + num_joints_in_extra * in_extra_features
+        in_total_features = num_joints_in * in_features + num_joints_in_extra * (in_extra_features - 4)
 
         self.expand_conv = nn.Conv1d(in_total_features, channels, filter_widths[0], bias=False)
 
@@ -185,7 +185,7 @@ class TemporalModelOptimized1f(TemporalModelBase):
                          num_joints_in_extra, in_extra_features,
                          num_joints_out, filter_widths, causal, dropout, channels)
 
-        in_total_features = num_joints_in * in_features + num_joints_in_extra * in_extra_features
+        in_total_features = num_joints_in * in_features + num_joints_in_extra * (in_extra_features - 4)
 
         self.expand_conv = nn.Conv1d(in_total_features, channels, filter_widths[0], stride=filter_widths[0], bias=False)
 
