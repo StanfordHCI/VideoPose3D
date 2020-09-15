@@ -17,7 +17,7 @@ from convert_mpi_to_vr import convert_mpi_to_pos_rot
 
 sys.path.append('../')
 
-output_filename = 'data_3d_h36m_mpi'
+output_filename = 'data_3d_mpi'
 subjects = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8']
 
 if __name__ == '__main__':
