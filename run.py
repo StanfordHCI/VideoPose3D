@@ -24,6 +24,7 @@ from common.loss import *
 from common.generators import ChunkedGenerator, UnchunkedGenerator
 from time import time
 from common.utils import deterministic_random
+from data.convert_h36m_to_vr import cal_pos_rot
 from data.convert_h36m_to_vr import visual_test
 args = parse_args()
 print(args)
@@ -41,7 +42,7 @@ except OSError as e:
 # -----------------------------prepare the 3D dataset as ground truth ------------------------------------
 print('Loading dataset...')
 dataset_path = 'data/data_3d_' + args.dataset + '.npz'
-if args.dataset == 'h36m_new2':
+if args.dataset == 'h36m':
     from common.h36m_dataset import Human36mDataset
     dataset = Human36mDataset(dataset_path)
 elif args.dataset.startswith('humaneva'):
@@ -59,10 +60,10 @@ print('Preparing data...')
 
 # Model v1.5: Do not apply camera transformation
 for subject in dataset.subjects():
-    lengths = dataset[subject]['lengths']
+    #lengths = dataset[subject]['lengths']
     for action in dataset[subject].keys():
-        if action == "lengths":
-            continue
+        #if action == "lengths":
+        #    continue
         anim = dataset[subject][action]
 
         if 'positions' in anim:
@@ -76,10 +77,11 @@ for subject in dataset.subjects():
         if 'pos_rot' in anim:
             positions_3d = []
             for cam in anim['cameras']:
-                pos_rot = anim['pos_rot'].copy()
                 # pos_rot[:, :, :3] = world_to_camera(pos_rot[:, :, :3], R=cam['orientation'], t=cam['translation'])
-                pos_rot[:, :, :2] -= pos_rot[:, :1, :2]  # Remove global offset
-                positions_3d.append(pos_rot)
+                pos_3d = anim['position']
+                pos_rot = anim['pos_rot']
+                pos_3d[:, 1:] -= pos_3d[:, :1]  # Remove global offset
+                positions_3d.append((pos_3d, pos_rot))
             anim['pos_rot'] = positions_3d
         # anim['lengths'] = lengths
 
