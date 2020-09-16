@@ -37,7 +37,7 @@ except OSError as e:
 # -----------------------------prepare the 3D dataset as ground truth ------------------------------------
 print('Loading dataset...')
 dataset_path = 'data/data_3d_' + args.dataset + '.npz'
-if args.dataset == 'h36m_new':
+if args.dataset == 'h36m_new2':
     from common.h36m_dataset import Human36mDataset
     dataset = Human36mDataset(dataset_path)
 elif args.dataset.startswith('humaneva'):
@@ -55,6 +55,8 @@ print('Preparing data...')
 
 for subject in dataset.subjects():
     for action in dataset[subject].keys():
+        if action == "lengths":
+            continue
         anim = dataset[subject][action]
 
         if 'positions' in anim:
@@ -69,6 +71,7 @@ for subject in dataset.subjects():
             positions_3d = []
             for cam in anim['cameras']:
                 pos_rot = anim['pos_rot'].copy()
+                #print(pos_rot.shape)
                 pos_rot[:, :, :3] = world_to_camera(pos_rot[:, :, :3], R=cam['orientation'], t=cam['translation'])
                 pos_rot[:, :, 3:] = world_to_camera_quat(pos_rot[:, :, 3:], R=cam['orientation'])
                 pos_rot[:, 1:, :3] -= pos_rot[:, :1, :3]  # Remove global offset, but keep trajectory in first position
@@ -88,6 +91,8 @@ keypoints = keypoints['positions_2d'].item()
 for subject in dataset.subjects():
     assert subject in keypoints, 'Subject {} is missing from the 2D detections dataset'.format(subject)
     for action in dataset[subject].keys():
+        if action == "lengths":
+            continue
         assert action in keypoints[subject], 'Action {} of subject {} is missing from the 2D detections dataset'.format(
             action, subject)
         if 'pos_rot' not in dataset[subject][action]:
