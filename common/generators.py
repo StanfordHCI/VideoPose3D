@@ -60,8 +60,8 @@ class ChunkedGenerator:
         assert cameras is None or len(cameras) == len(poses_2d)
         # Build lineage info
         
-        for i in range(len(poses_2d)):
-            poses_2d[i] = normalize_maxmin(poses_2d[i])
+        #for i in range(len(poses_2d)):
+        #    poses_2d[i] = normalize_maxmin(poses_2d[i])
         
         pairs = [] # (seq_idx, start_frame, end_frame, flip) tuples
         for i in range(len(poses_2d)):
@@ -216,8 +216,8 @@ class UnchunkedGenerator:
         assert poses_3d is None or len(poses_3d) == len(poses_2d)
         assert cameras is None or len(cameras) == len(poses_2d)
         
-        for i in range(len(poses_2d)):
-            poses_2d[i] = normalize_maxmin(poses_2d[i])
+        #for i in range(len(poses_2d)):
+        #    poses_2d[i] = normalize_maxmin(poses_2d[i])
         self.augment = augment
         self.kps_left = kps_left
         self.kps_right = kps_right
