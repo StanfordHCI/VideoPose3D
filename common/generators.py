@@ -8,6 +8,30 @@
 from itertools import zip_longest
 import numpy as np
 
+
+def normalize_maxmin(pose_2d):
+    assert len(pose_2d.shape) == 3
+    #print(pose_2d.shape)
+    #print(pose_2d[0,:,:])
+    return_pose = pose_2d.copy()
+    for i in range(pose_2d.shape[0]):
+        pos = pose_2d[i, :, :]
+        min_x = np.min(pos[:, 0])
+        #print(pose_2d[:, :, 0], min_x)
+        max_x = np.max(pos[:, 0])
+        min_y = np.min(pos[:, 1])
+        max_y = np.max(pos[:, 1])
+        diff_x = max_x - min_x
+        diff_y = max_y - min_y
+        max_range = max(diff_x, diff_y)
+        #print(((pos[:, [0, 1]] - [min_x, min_y]) / max_range).shape)
+        #print(return_pose[i, :, [0, 1]].shape)
+        return_pose[i, :, 0:2] = (pos[:, [0, 1]] - [min_x, min_y]) / max_range
+        #print(pose_2d[0,:,:])
+        #raise KeyboardInterrupt
+    return return_pose
+
+
 class ChunkedGenerator:
     """
     Batched data generator, used for training.
@@ -35,6 +59,10 @@ class ChunkedGenerator:
         assert poses_3d is None or len(poses_3d) == len(poses_2d), (len(poses_3d), len(poses_2d))
         assert cameras is None or len(cameras) == len(poses_2d)
         # Build lineage info
+        
+        for i in range(len(poses_2d)):
+            poses_2d[i] = normalize_maxmin(poses_2d[i])
+        
         pairs = [] # (seq_idx, start_frame, end_frame, flip) tuples
         for i in range(len(poses_2d)):
             assert poses_3d is None or poses_3d[i].shape[0] == poses_3d[i].shape[0]
@@ -187,7 +215,9 @@ class UnchunkedGenerator:
                  augment=False, kps_left=None, kps_right=None, joints_left=None, joints_right=None):
         assert poses_3d is None or len(poses_3d) == len(poses_2d)
         assert cameras is None or len(cameras) == len(poses_2d)
-
+        
+        for i in range(len(poses_2d)):
+            poses_2d[i] = normalize_maxmin(poses_2d[i])
         self.augment = augment
         self.kps_left = kps_left
         self.kps_right = kps_right
