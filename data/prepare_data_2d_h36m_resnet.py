@@ -234,6 +234,9 @@ if __name__ == '__main__':
             #    visual("you"+str(i)+'.jpg', positions_2d[i][0])
             #raise KeyboardInterrupt
             output_2d_poses[subject][action] = positions_2d_posenet
+
+        print("saving user" + subject)
+        np.savez_compressed(output_filename_2d + subject, positions_2d=output_2d_poses[subject])
             
             
     print('Saving...')
