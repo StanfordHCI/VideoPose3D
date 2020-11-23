@@ -34,7 +34,6 @@ output_filename_2d = 'data_2d_h36m_resnet'
 subjects = ['S1', 'S5', 'S6', 'S7', 'S8', 'S9', 'S11']
 
 def visual(frame, name, keypoints):
-    print(keypoints)
     img=np.zeros((960,640,3))
     for i in range(0,21):
         x, y = int(keypoints[i][0]), int(keypoints[i][1])
@@ -218,7 +217,8 @@ if __name__ == '__main__':
                         #visual(image_stack[j][0], "test" + str(j)+".jpg", joint_2d)
                         temp_pos.append(joint_2d)
                     #raise KeyboardInterrupt
-                #print(len(temp_pos))  
+                #print(len(temp_pos))
+                        # visual(image_stack[j][0], "my"+str(i * batch_size + j)+'.jpg', temp_pos[-1])
                 positions_2d_posenet.append(np.array(temp_pos))
             #raise KeyboardInterrupt
 
