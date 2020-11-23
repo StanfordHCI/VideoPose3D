@@ -29,7 +29,7 @@ from SimpleHRNet import SimpleHRNet
 from misc.visualization import draw_points, draw_skeleton, draw_points_and_skeleton, joints_dict, check_video_rotation
 from misc.utils import find_person_id_associations
 
-output_filename = 'data_3d_h36m'
+output_filename = 'data_3d_h36m_new2'
 output_filename_2d = 'data_2d_h36m_resnet'
 subjects = ['S1', 'S5', 'S6', 'S7', 'S8', 'S9', 'S11']
 
@@ -162,9 +162,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
 
-    model = Get_ResNet_Model(hrnet_m = 'PoseResNet', hrnet_c = 50, hrnet_j = 21, hrnet_weights = "../../resnetpose/weights/model_best.pth.tar", 
+    model = Get_ResNet_Model(hrnet_m = 'PoseResNet', hrnet_c = 152, hrnet_j = 21, hrnet_weights = "../../resnetpose/weights/pose_resnet_152_384x288_new.pth",
         hrnet_joints_set = "coco", image_resolution = '(384, 288)',
-        single_person = False, use_tiny_yolo= True, disable_tracking = True, max_batch_size = 500)
+        single_person = False, use_tiny_yolo= False, disable_tracking = True, max_batch_size = 500)
 
     
     #output_stride = model.output_stride
@@ -221,14 +221,14 @@ if __name__ == '__main__':
                 #print(len(temp_pos))  
                 positions_2d_posenet.append(np.array(temp_pos))
             #raise KeyboardInterrupt
-            
+
             anim = dataset[subject][action]
-            positions_2d = []
-            for cam in anim['cameras']:
-                pos_3d = world_to_camera(anim['positions'], R=cam['orientation'], t=cam['translation'])
-                pos_2d = wrap(project_to_2d, pos_3d, cam['intrinsic'], unsqueeze=True)
-                pos_2d_pixel_space = image_coordinates(pos_2d, w=cam['res_w'], h=cam['res_h'])
-                positions_2d.append(pos_2d_pixel_space.astype('float32'))
+            # positions_2d = []
+            # for cam in anim['cameras']:
+            #     pos_3d = world_to_camera(anim['pos_rot'], R=cam['orientation'], t=cam['translation'])
+            #     pos_2d = wrap(project_to_2d, pos_3d, cam['intrinsic'], unsqueeze=True)
+            #     pos_2d_pixel_space = image_coordinates(pos_2d, w=cam['res_w'], h=cam['res_h'])
+            #     positions_2d.append(pos_2d_pixel_space.astype('float32'))
             #for i in range(0,4):
             #    visual("my"+str(i)+'.jpg', positions_2d_posenet[i][0])
             #    visual("you"+str(i)+'.jpg', positions_2d[i][0])

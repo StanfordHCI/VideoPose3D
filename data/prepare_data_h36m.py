@@ -124,7 +124,7 @@ if __name__ == '__main__':
             print(f"Subject {subject}")
             output[subject] = {}
             saved_lengths = []
-            file_list = glob(args.from_source_cdf + '/' + subject + '/MyPoseFeatures/D3_Positions/*.cdf')
+            file_list = glob(args.from_source_cdf + '/' + subject + '/Poses_D3_Positions/*.cdf')
             assert len(file_list) == 30, "Expected 30 files for subject " + subject + ", got " + str(len(file_list))
             for f in file_list:
                 action = os.path.splitext(os.path.basename(f))[0]
