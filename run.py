@@ -13,6 +13,7 @@ import datetime
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
 import torch.nn.functional as F
+from tqdm import tqdm
 import torch.optim as optim
 import os
 import sys
@@ -180,11 +181,6 @@ def fetch(subjects, action_filter=None, subset=1, parse_3d_poses=True):
                     if 'intrinsic' in cam:
                         out_camera_params.append(cam['intrinsic'])
 
-            if parse_3d_poses and 'pos_rot' in dataset[subject][action]:
-                poses_3d = dataset[subject][action]['pos_rot']
-                assert len(poses_3d) == len(poses_2d), 'Camera count mismatch'
-                for i in range(len(poses_3d)):  # Iterate across cameras
-                    out_poses_3d.append(poses_3d[i])
     #print(out_poses_3d[0][0:2,:,:])
     if len(out_camera_params) == 0:
         out_camera_params = None
@@ -487,14 +483,18 @@ if not args.evaluate:
 
                 optimizer.zero_grad()
 
+                # assume inputs_2d.shape == x * 21 * 3
+                inputs_2d_conf = torch.sum(inputs_2d[:, [-1], :, 2], dim=2, keepdim=True)
+                output_weights = (inputs_2d_conf > 0.00001).float() * 0.9 + 0.1
+
                 # Predict 3D poses
                 predicted_3d_pos_rot = model_pos_train((inputs_2d, inputs_3d_input))
                 predicted_3d_pos = predicted_3d_pos_rot[..., :3]
                 predicted_3d_rot = predicted_3d_pos_rot[..., 3:]
                 reference_pos = inputs_3d[..., :3]
                 reference_rot = inputs_3d[..., 3:]
-                loss_3d_pos = mpjpe(predicted_3d_pos, reference_pos)
-                loss_3d_rot = quat_criterion(predicted_3d_rot, reference_rot)
+                loss_3d_pos = weighted_mpjpe(predicted_3d_pos, reference_pos, output_weights.expand(predicted_3d_pos.shape[:-1]))
+                loss_3d_rot = weighted_quat_criterion(predicted_3d_rot, reference_rot, output_weights.expand(predicted_3d_rot.shape[:-1]))
                 writer.add_scalar(f"train/loss_pos", loss_3d_pos, iter)
                 writer.add_scalar(f"train/loss_rot", loss_3d_rot, iter)
                 iter += 1
@@ -532,7 +532,7 @@ if not args.evaluate:
 
             if not args.no_eval:
                 # Evaluate on test set
-                for cam, batch, batch_2d, batch_3d_input in test_generator.next_epoch():
+                for cam, batch, batch_2d, batch_3d_input in tqdm(test_generator.next_epoch()):
                     inputs_3d = torch.from_numpy(batch.astype('float32'))
                     inputs_2d = torch.from_numpy(batch_2d.astype('float32'))
                     inputs_3d_input = torch.from_numpy(batch_3d_input.astype('float32'))

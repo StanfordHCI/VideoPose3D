@@ -104,3 +104,17 @@ def quat_criterion(output_quat, reference_quat):
     all_quat_loss = torch.abs(torch.acos((trace - 2) / 2.00001))
     return torch.mean(all_quat_loss)
 
+
+def weighted_quat_criterion(output_quat, reference_quat, w):
+    assert output_quat.shape == reference_quat.shape
+    output_quat = output_quat.reshape(-1, 4)
+    reference_quat = reference_quat.reshape(-1, 4)
+    output_rot_mat = quat_to_rot_mat(output_quat)
+    reference_rot_mat = quat_to_rot_mat(reference_quat)
+    output_rot_mat_t = torch.transpose(output_rot_mat, 1, 2)
+    rot_mat_prod = torch.matmul(output_rot_mat_t, reference_rot_mat)
+    trace = torch.sum(torch.diagonal(rot_mat_prod, 0, 1, 2), dim=1)
+    all_quat_loss = torch.abs(torch.acos((trace - 2) / 2.00001))
+    return torch.mean(w.reshape(-1) * all_quat_loss)
+
+
