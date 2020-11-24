@@ -176,6 +176,9 @@ if __name__ == '__main__':
     batch_size = args.batch_size
 
     for subject in dataset.subjects():
+        # if subject in ["S1", "S5", "S6", "S7", "S8", "S9"]:
+        #     print(f"skipping {subject}")
+        #     continue
         output_2d_poses[subject] = {}
         for action in dataset[subject].keys():
             positions_2d_posenet = []
@@ -196,7 +199,7 @@ if __name__ == '__main__':
                 frames_num=int(cap.get(7))
                 #print(frames_num)
                 print(f,frames_num )
-                temp_pos = []  
+                temp_pos = []
                 for i in tqdm(range(0, (frames_num -1)//batch_size+1)):
                     image_stack = []
                     for j in range(0, batch_size):
@@ -209,7 +212,7 @@ if __name__ == '__main__':
                     #raise KeyboardInterrupt
                     joint2D = getKptsFromImage(model, inputs)
                     #print(len(joint2D))
-                    
+
                     for j in range(0, len(joint2D)):
                         if len(joint2D[j]) <= 0: print(j, joint2D[j])
                         joint_2d = joint2D[j][0]
@@ -237,6 +240,9 @@ if __name__ == '__main__':
 
         print("saving user" + subject)
         np.savez_compressed(output_filename_2d + subject, positions_2d=output_2d_poses[subject])
+    # for subject in dataset.subjects():
+    #     positions_2d_posenet = np.load(output_filename_2d + subject + ".npz", allow_pickle=True)["positions_2d"]
+    #     output_2d_poses[subject] = positions_2d_posenet
             
             
     print('Saving...')
