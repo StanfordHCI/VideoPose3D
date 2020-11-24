@@ -95,9 +95,10 @@ keypoints = keypoints['positions_2d'].item()
 
 for subject in dataset.subjects():
     assert subject in keypoints, 'Subject {} is missing from the 2D detections dataset'.format(subject)
+    if "lengths" in dataset[subject].keys():
+        del dataset[subject]["lengths"]
+        continue
     for action in dataset[subject].keys():
-        if action == "lengths":
-            continue
         assert action in keypoints[subject], 'Action {} of subject {} is missing from the 2D detections dataset'.format(action, subject)
         if 'pos_rot' not in dataset[subject][action]:
             continue
@@ -116,6 +117,9 @@ for subject in dataset.subjects():
 
 # -----------------------------normalize the 2D input ------------------------------------
 for subject in keypoints.keys():
+    if "lengths" in keypoints[subject].keys():
+        del keypoints[subject]["lengths"]
+        continue
     for action in keypoints[subject]:
         for cam_idx, kps in enumerate(keypoints[subject][action]):
             # Normalize camera frame
