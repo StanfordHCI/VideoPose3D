@@ -157,8 +157,21 @@ def fetch(subjects, action_filter=None, subset=1, parse_3d_poses=True):
                     continue
 
             poses_2d = keypoints[subject][action]
+            process_3d = False
+            if parse_3d_poses and 'pos_rot' in dataset[subject][action]:
+                poses_3d = dataset[subject][action]['pos_rot']
+                assert len(poses_3d) == len(poses_2d), 'Camera count mismatch'
+                process_3d = True
+
             for i in range(len(poses_2d)):  # Iterate across cameras
-                out_poses_2d.append(poses_2d[i])
+                if process_3d:  # Iterate across cameras
+                    len_3d = len(poses_3d[i])
+                    len_2d = len(poses_2d[i])
+                    min_len = min(len_2d, len_3d)
+                    out_poses_3d.append(poses_3d[i][:min_len])
+                    out_poses_2d.append(poses_2d[i][:min_len])
+                else:
+                    out_poses_2d.append(poses_2d[i])
 
             if subject in dataset.cameras():
                 cams = dataset.cameras()[subject]

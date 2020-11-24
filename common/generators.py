@@ -93,9 +93,12 @@ class ChunkedGeneratorDataset(Dataset):
         if poses_3d is not None:
             poses_3d, poses_3d_input = extract_3d(poses_3d, skeleton.input_joints(), skeleton.output_joints())
         for i in range(len(poses_2d)):
-            assert poses_3d is None or poses_3d[i].shape[0] == poses_3d[i].shape[0]
-            n_chunks = (poses_2d[i].shape[0] + chunk_length - 1) // chunk_length
-            offset = (n_chunks * chunk_length - poses_2d[i].shape[0]) // 2
+            assert poses_3d is None or poses_3d[i].shape[0] == poses_2d[i].shape[0]
+            # if poses_3d[i].shape[0] != poses_2d[i].shape[0]:
+            #     print(f"length diff: {poses_3d[i].shape[0] - poses_2d[i].shape[0]}")
+            pose_length = min(poses_3d[i].shape[0], poses_2d[i].shape[0])
+            n_chunks = (pose_length + chunk_length - 1) // chunk_length
+            offset = (n_chunks * chunk_length - pose_length) // 2
             bounds = np.arange(n_chunks + 1) * chunk_length - offset
             augment_vector = np.full(len(bounds - 1), False, dtype=bool)
             pairs += zip(np.repeat(i, len(bounds - 1)), bounds[:-1], bounds[1:], augment_vector)
