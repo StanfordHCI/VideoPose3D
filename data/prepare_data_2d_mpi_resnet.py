@@ -17,19 +17,18 @@ import torch
 from tqdm import tqdm
 
 sys.path.append('../')
-from common.h36m_dataset import Human36mDataset
+from common.mpi_dataset import MpiDataset
 
 sys.path.append('../../resnetpose/')
 from SimpleHRNet import SimpleHRNet
 from misc.utils import find_person_id_associations
 
-output_filename = 'data_3d_h36m_mpi'
+output_filename = 'data_3d_mpi'
 output_filename_2d = 'data_2d_mpi_resnet'
 subjects = ['S1', 'S5', 'S6', 'S7', 'S8', 'S9', 'S11']
 
 
 def visual(frame, name, keypoints):
-    print(keypoints)
     img = np.zeros((960, 640, 3))
     for i in range(0, 21):
         x, y = int(keypoints[i][0]), int(keypoints[i][1])
@@ -154,21 +153,21 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    model = Get_ResNet_Model(hrnet_m='PoseResNet', hrnet_c=50, hrnet_j=21,
-                             hrnet_weights="../../resnetpose/weights/model_best.pth.tar",
+    model = Get_ResNet_Model(hrnet_m='PoseResNet', hrnet_c=152, hrnet_j=21,
+                             hrnet_weights="../../resnetpose/weights/pose_resnet_152_384x288_new.pth",
                              hrnet_joints_set="coco", image_resolution='(384, 288)',
-                             single_person=False, use_tiny_yolo=True, disable_tracking=True, max_batch_size=500)
+                             single_person=False, use_tiny_yolo=False, disable_tracking=True, max_batch_size=500)
 
     # output_stride = model.output_stride
 
     # Create 2D pose file
     print('')
     print('Computing ground-truth 2D poses...')
-    dataset = Human36mDataset(output_filename + '.npz')
+    dataset = MpiDataset(output_filename + '.npz')
     output_2d_poses = {}
-    batch_size = 25
+    batch_size = args.batch_size
 
-    for subject in [f'S{args.subject}']:
+    for subject in dataset.subjects():
         output_2d_poses[subject] = {}
         for action in dataset[subject].keys():
             positions_2d_posenet = []
@@ -200,8 +199,8 @@ if __name__ == '__main__':
                         if len(joint2D[j]) <= 0: print(j, joint2D[j])
                         joint_2d = joint2D[j][0]
                         joint_2d = joint_2d[:, [1, 0, 2]]
-                        # visual(image_stack[j][0], "test" + str(j)+".jpg", joint_2d)
                         temp_pos.append(joint_2d)
+                        visual(image_stack[j][0], "my"+str(i * batch_size + j)+'.jpg', temp_pos[-1])
                     # raise KeyboardInterrupt
                 # print(len(temp_pos))
                 positions_2d_posenet.append(np.array(temp_pos))
@@ -219,6 +218,9 @@ if __name__ == '__main__':
             #    visual("you"+str(i)+'.jpg', positions_2d[i][0])
             # raise KeyboardInterrupt
             output_2d_poses[subject][action] = positions_2d_posenet
+
+            print("saving user" + subject)
+            np.savez_compressed(output_filename_2d + subject, positions_2d=output_2d_poses[subject])
 
     print('Saving...')
     metadata = {
