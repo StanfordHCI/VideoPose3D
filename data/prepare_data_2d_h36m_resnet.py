@@ -241,7 +241,7 @@ if __name__ == '__main__':
         print("saving user" + subject)
         np.savez_compressed(output_filename_2d + subject, positions_2d=output_2d_poses[subject])
     # for subject in dataset.subjects():
-    #     positions_2d_posenet = np.load(output_filename_2d + subject + ".npz", allow_pickle=True)["positions_2d"]
+    #     positions_2d_posenet = np.load(output_filename_2d + subject + ".npz", allow_pickle=True)["positions_2d"].flatten()[0]
     #     output_2d_poses[subject] = positions_2d_posenet
             
             
